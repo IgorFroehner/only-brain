@@ -31,10 +31,6 @@ impl NeuralNetwork {
         Self { layers }
     }
 
-    pub fn activation_function(x: f64) -> f64 {
-        1.0 / (1.0 + (-x).exp())
-    }
-
     pub fn feed_forward(&self, inputs: &Vec<f64>) -> Vec<f64> {
         let mut outputs = DVector::from(Vec::clone(inputs));
 
@@ -43,6 +39,10 @@ impl NeuralNetwork {
         }
 
         outputs.data.into()
+    }
+
+    pub fn activation_function(x: f64) -> f64 {
+        1.0 / (1.0 + (-x).exp())
     }
 
     pub fn print(&self) {
