@@ -1,53 +1,80 @@
-use rand::{Rng, thread_rng};
+use crate::activation_functions::{ActivationFunction, ACTION_FUNCTIONS_MAP};
+use crate::layer::Layer;
+use crate::math_utils::sigmoid;
 use nalgebra::{DMatrix, DVector};
-
-pub struct Layer {
-    pub weights: DMatrix<f64>,
-    pub bias: DVector<f64>,
-}
+use rand::thread_rng;
+use std::collections::HashMap;
 
 pub struct NeuralNetwork {
-    layers: Vec<Layer>,
-}
-
-impl Layer {
-    pub fn forward(&self, inputs: &DVector<f64>) -> DVector<f64> {
-        let outputs = &self.weights * inputs + &self.bias;
-        outputs.map(|x| NeuralNetwork::activation_function(x))
-    }
+    pub layers: Vec<Layer>,
+    activation_function: Option<ActivationFunction>,
 }
 
 impl NeuralNetwork {
     pub fn new(layers: &Vec<usize>) -> Self {
         let mut rng = thread_rng();
 
-        let layers = layers.iter().zip(layers.iter().skip(1)).map(|(a, b)| {
-            Layer {
-                weights: DMatrix::from_fn(*b, *a, |_, _| rng.gen_range(-1.0..1.0)),
-                bias: DVector::from_element(*b, 0.0),
-            }
-        }).collect::<Vec<Layer>>();
+        let layers = layers
+            .iter()
+            .zip(layers.iter().skip(1))
+            .map(|(a, b)| Layer::from_size(*b, *a, &mut rng))
+            .collect::<Vec<Layer>>();
 
-        Self { layers }
+        Self {
+            layers,
+            activation_function: None,
+        }
     }
 
     pub fn feed_forward(&self, inputs: &Vec<f64>) -> Vec<f64> {
         let mut outputs = DVector::from(Vec::clone(inputs));
 
         for layer in &self.layers {
-            outputs = layer.forward(&outputs);
+            outputs = layer.forward(&outputs, self.activation_function());
         }
 
         outputs.data.into()
     }
 
-    pub fn activation_function(x: f64) -> f64 {
-        1.0 / (1.0 + (-x).exp())
+    pub fn set_layer_weights(&mut self, layer: usize, weights: DMatrix<f64>) {
+        if layer <= 0 {
+            panic!("Invalid layer index");
+        }
+        self.layers[layer - 1].set_weights(weights);
+    }
+
+    pub fn set_layer_biases(&mut self, layer: usize, biases: DVector<f64>) {
+        if layer <= 0 {
+            panic!("Invalid layer index");
+        }
+        self.layers[layer - 1].set_biases(biases);
+    }
+
+    pub fn set_weight(&mut self, layer: usize, neuron: usize, input: usize, weight: f64) {
+        if layer <= 0 {
+            panic!("Invalid layer index");
+        }
+        self.layers[layer - 1].set_weight(neuron, input, weight);
+    }
+
+    pub fn activation_function(&self) -> fn(f64) -> f64 {
+        if self.activation_function.is_none() {
+            return sigmoid;
+        }
+        let functions_map = ACTION_FUNCTIONS_MAP
+            .iter()
+            .cloned()
+            .collect::<HashMap<ActivationFunction, _>>();
+
+        functions_map
+            .get(&self.activation_function.unwrap())
+            .unwrap()
+            .clone()
     }
 
     pub fn print(&self) {
         for layer in &self.layers {
-            println!("{} {}", layer.weights, layer.bias);
+            println!("{} {}", layer.weights(), layer.biases());
         }
     }
 }
