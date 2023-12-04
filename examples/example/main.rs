@@ -24,7 +24,11 @@ fn main() {
 
     println!("{:?}", output);
     println!("{:?}", nn.num_layers());
-    println!("{:?}", nn.layer_size(0));
+    let n_layers = nn.num_layers();
+
+    for i in 0..n_layers {
+        println!("{:?}", nn.layer_size(i));
+    }
 
     println!("{:?}", nn.get_weight(1, 0, 1));
 }

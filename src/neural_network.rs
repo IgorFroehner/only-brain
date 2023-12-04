@@ -142,7 +142,7 @@ impl NeuralNetwork {
         if layer == 0 {
             return self.layers[0].weights().ncols();
         }
-        self.layers[layer].size()
+        self.layers[layer - 1].size()
     }
 
     fn activation_function(&self) -> fn(f64) -> f64 {
