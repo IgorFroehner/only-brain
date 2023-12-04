@@ -5,6 +5,7 @@ edition = "2021"
 repository = "https://github.com/IgorFroehner/only-brain"
 description = "A simple Neural Network library, without the learning part."
 include = ["src/**/*", "Cargo.toml", "README.md", "LICENSE"]
+license = "MIT"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
