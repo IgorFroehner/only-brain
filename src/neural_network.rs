@@ -123,6 +123,16 @@ impl NeuralNetwork {
         self.layers[layer - 1].set_weight(neuron, input, weight);
     }
 
+    /// Returns the number of layers of the neural network.
+    pub fn num_layers(&self) -> usize {
+        self.layers.len()
+    }
+
+    /// Returns the number of neurons of the given layer.
+    pub fn layer_size(&self, layer: usize) -> usize {
+        self.layers[layer].size()
+    }
+
     fn activation_function(&self) -> fn(f64) -> f64 {
         if self.activation_function.is_none() {
             return sigmoid;

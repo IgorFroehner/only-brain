@@ -12,3 +12,4 @@ license = "MIT"
 [dependencies]
 rand = "0.8.5"
 nalgebra = "0.32.3"
+bevy = "0.12.1"
