@@ -45,7 +45,7 @@ impl NeuralNetwork {
     /// # Example
     ///
     /// ```
-    /// # use no_brain::NeuralNetwork;
+    /// # use only_brain::NeuralNetwork;
     /// # fn main() {
     /// let nn = NeuralNetwork::new(&vec![2, 2, 1]);
     /// # }
@@ -123,13 +123,25 @@ impl NeuralNetwork {
         self.layers[layer - 1].set_weight(neuron, input, weight);
     }
 
+    /// Gets the weight of a specific neuron connection. The layer index must be greater
+    /// than 0 since the input layer does not have weights.
+    pub fn get_weight(&self, layer: usize, neuron: usize, input: usize) -> f64 {
+        if layer <= 0 {
+            panic!("Invalid layer index");
+        }
+        self.layers[layer - 1].weights()[(neuron, input)]
+    }
+
     /// Returns the number of layers of the neural network.
     pub fn num_layers(&self) -> usize {
-        self.layers.len()
+        self.layers.len() + 1
     }
 
     /// Returns the number of neurons of the given layer.
     pub fn layer_size(&self, layer: usize) -> usize {
+        if layer == 0 {
+            return self.layers[0].weights().ncols();
+        }
         self.layers[layer].size()
     }
 

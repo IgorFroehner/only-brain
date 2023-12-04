@@ -1,5 +1,5 @@
 use nalgebra::{dmatrix, dvector};
-use no_brain::NeuralNetwork;
+use only_brain::NeuralNetwork;
 
 fn main() {
     let mut nn = NeuralNetwork::new(&vec![2, 3, 2]);
@@ -23,4 +23,8 @@ fn main() {
     nn.print();
 
     println!("{:?}", output);
+    println!("{:?}", nn.num_layers());
+    println!("{:?}", nn.layer_size(0));
+
+    println!("{:?}", nn.get_weight(1, 0, 1));
 }
