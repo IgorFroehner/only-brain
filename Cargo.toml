@@ -1,7 +1,10 @@
 [package]
-name = "no-brain"
+name = "only-brain"
 version = "0.1.0"
 edition = "2021"
+repository = "https://github.com/IgorFroehner/only-brain"
+description = "A simple Neural Network library, without the learning part."
+include = ["src/**/*", "Cargo.toml", "README.md", "LICENSE"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
