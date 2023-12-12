@@ -3,6 +3,8 @@ use crate::layer::Layer;
 use nalgebra::{DMatrix, DVector};
 use rand::thread_rng;
 use std::collections::HashMap;
+use std::fmt;
+use serde::{Deserialize, Serialize};
 
 /// Neural Network
 ///
@@ -13,7 +15,7 @@ use std::collections::HashMap;
 /// # Example
 ///
 /// ```
-/// use no_brain::NeuralNetwork;
+/// use only_brain::NeuralNetwork;
 /// use nalgebra::dmatrix;
 /// use nalgebra::dvector;
 ///
@@ -33,6 +35,7 @@ use std::collections::HashMap;
 ///     println!("{:?}", output);
 /// }
 /// ```
+#[derive(Serialize, Deserialize)]
 pub struct NeuralNetwork {
     layers: Vec<Layer>,
     activation_function: Option<ActivationFunction>,
@@ -70,7 +73,7 @@ impl NeuralNetwork {
     /// # Example
     ///
     /// ```
-    /// # use no_brain::NeuralNetwork;
+    /// # use only_brain::NeuralNetwork;
     /// # use nalgebra::dmatrix;
     /// # use nalgebra::dvector;
     /// # fn main() {
@@ -140,9 +143,13 @@ impl NeuralNetwork {
     /// Returns the number of neurons of the given layer.
     pub fn layer_size(&self, layer: usize) -> usize {
         if layer == 0 {
-            return self.layers[0].weights().ncols();
+            return self.input_layer_size();
         }
         self.layers[layer - 1].size()
+    }
+
+    fn input_layer_size(&self) -> usize {
+        self.layers[0].weights().ncols()
     }
 
     fn activation_function(&self) -> fn(f64) -> f64 {
@@ -164,5 +171,19 @@ impl NeuralNetwork {
         for layer in &self.layers {
             println!("{} {}", layer.weights(), layer.biases());
         }
+    }
+}
+
+impl fmt::Display for NeuralNetwork {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Neural Network")?;
+        writeln!(f, "Activation Function: {:?}", self.activation_function)?;
+        writeln!(f)?;
+        writeln!(f, "Input Layer Size: {}", self.input_layer_size())?;
+        writeln!(f)?;
+        for (index, layer) in self.layers.iter().enumerate() {
+            writeln!(f, "Layer {}: {}", index + 1, layer)?;
+        }
+        Ok(())
     }
 }

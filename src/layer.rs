@@ -1,7 +1,10 @@
+use std::fmt;
 use nalgebra::{DMatrix, DVector};
 use rand::distributions::Uniform;
 use rand::Rng;
+use serde::{Deserialize, Serialize};
 
+#[derive(Serialize, Deserialize)]
 pub struct Layer {
     size: usize,
     weights: DMatrix<f64>,
@@ -52,5 +55,23 @@ impl Layer {
 
     pub fn weights(&self) -> &DMatrix<f64> {
         &self.weights
+    }
+}
+
+impl fmt::Display for Layer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Layer Size: {}", self.size)?;
+        writeln!(f, "Weights:")?;
+        for i in 0..self.weights.nrows() {
+            for j in 0..self.weights.ncols() {
+                write!(f, "{:0.2} ", self.weights[(i, j)])?;
+            }
+            writeln!(f)?;
+        }
+        writeln!(f, "Biases:")?;
+        for bias in self.bias.iter() {
+            writeln!(f, "{:0.2}", bias)?;
+        }
+        Ok(())
     }
 }

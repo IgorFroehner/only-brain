@@ -17,10 +17,9 @@ fn main() {
 
     nn.set_weight(1, 0, 0, 0.99);
 
-    let input = vec![0.5, 0.2];
-    let output = nn.feed_forward(&input);
-
-    println!("{}", nn);
-
     dump_model(&nn, "model.bin").expect("Failed to dump model");
+
+    let nn2 = load_model("model.bin").expect("Failed to load model");
+
+    nn2.print();
 }
