@@ -1,6 +1,6 @@
 use std::fmt;
 use nalgebra::{DMatrix, DVector};
-use rand::distributions::Uniform;
+use rand::distr::Uniform;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
@@ -13,11 +13,12 @@ pub struct Layer {
 
 impl Layer {
     pub fn from_size<T: Rng>(neurons: usize, inputs: usize, rng: &mut T) -> Self {
-        let uniform = Uniform::new(-1.0, 1.0);
+        // rand 0.9: Uniform::new(low, high) returns Result; unwrap to get distribution
+        let uniform = Uniform::new(-1.0f64, 1.0f64).unwrap();
 
         Self {
             size: neurons,
-            weights: DMatrix::from_fn(neurons, inputs, |_, _| rng.sample(uniform)),
+            weights: DMatrix::from_fn(neurons, inputs, |_, _| rng.sample(&uniform)),
             bias: DVector::from_element(neurons, 0.0),
         }
     }

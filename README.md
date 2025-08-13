@@ -28,3 +28,12 @@ fn main() {
     println!("{:?}", output);
 }
 ```
+
+## TODO
+
+- [ ] Abstract better the DVector and DMatrix from the user's perspective;
+- [ ] Make it possible to load polars dataframes/datasets;
+- [ ] Make the types know the size of the NeuralNetwork/inputs and outputs neurons;
+    - This way it would be possible to capture the dimension errors in compile time;
+- [ ] Fix and improve model dump and load;
+

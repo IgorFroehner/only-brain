@@ -3,8 +3,8 @@
 //!
 //! A very simple Neural Network library built in Rust with the objective to allow
 //! the user to create, manipulate and train a neural network directly. The user has
-//! direct access to weights and biases of the network, allowing him to implement
-//! his own training methods.
+//! direct access to weights and biases of the network, allowing them to implement
+//! their own training and manipulation methods.
 //!
 //! # Example
 //!
@@ -34,7 +34,12 @@ mod layer;
 mod activation_functions;
 
 mod io;
-mod neural_network_builder;
+mod perceptron;
+mod bvector;
 
 pub use io::*;
 pub use neural_network::*;
+pub use perceptron::*;
+pub use activation_functions::*;
+pub use bvector::*;
+

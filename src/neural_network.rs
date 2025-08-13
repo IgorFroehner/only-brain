@@ -1,7 +1,7 @@
 use crate::activation_functions::{sigmoid, ActivationFunction, ACTION_FUNCTIONS_MAP};
 use crate::layer::Layer;
 use nalgebra::{DMatrix, DVector};
-use rand::thread_rng;
+use rand::rng;
 use std::collections::HashMap;
 use std::fmt;
 use serde::{Deserialize, Serialize};
@@ -53,7 +53,7 @@ impl NeuralNetwork {
     /// let nn = NeuralNetwork::new(&vec![2, 2, 1]);
     /// # }
     pub fn new(layers: &Vec<usize>) -> Self {
-        let mut rng = thread_rng();
+        let mut rng = rng();
 
         let layers = layers
             .iter()
@@ -177,7 +177,7 @@ impl NeuralNetwork {
 impl fmt::Display for NeuralNetwork {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "Neural Network")?;
-        writeln!(f, "Activation Function: {:?}", self.activation_function)?;
+        writeln!(f, "Activation Function: {:?}", self.activation_function())?;
         writeln!(f)?;
         writeln!(f, "Input Layer Size: {}", self.input_layer_size())?;
         writeln!(f)?;
