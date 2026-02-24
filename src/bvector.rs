@@ -2,17 +2,14 @@ use std::ops;
 
 use nalgebra::{SimdRealField, SVector};
 
-pub trait LinAlgVector<T: SimdRealField> {
-    fn dot(&self, other: &Self) -> T;
-    fn len(&self) -> usize;
-}
-
+/// This module provides a vector type `BVector` that is optimized for compile-time
+/// dimension and uses SIMD operations for performance.
 #[derive(Debug, Clone, PartialEq)]
-pub struct BVector<T: SimdRealField, const N: usize> {
+pub struct BVector<T: SimdRealField + Copy, const N: usize> {
     pub data_vector: SVector<T, N>,
 }
 
-impl<T: SimdRealField, const N: usize> BVector<T, N> {
+impl<T: SimdRealField + Copy, const N: usize> BVector<T, N> {
     /// Constructs a vector filled with `element` of a dimension `N`.
     pub fn from_element(element: T) -> Self {
         BVector {
@@ -29,19 +26,22 @@ impl<T: SimdRealField, const N: usize> BVector<T, N> {
             data_vector: SVector::<T, N>::from_row_slice(&data),
         }
     }
-}
 
-impl<T: SimdRealField, const N: usize> LinAlgVector<T> for BVector<T, N> {
-    fn dot(&self, other: &Self) -> T {
+    pub fn dot(&self, other: &Self) -> T {
         self.data_vector.dot(&other.data_vector)
     }
 
-    fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         N
+    }
+
+    pub fn get(&self, index: usize) -> T {
+        assert!(index < N, "Index out of bounds");
+        self.data_vector[index]
     }
 }
 
-impl<T: SimdRealField, const N: usize> ops::Add for BVector<T, N> {
+impl<T: SimdRealField + Copy, const N: usize> ops::Add for BVector<T, N> {
     type Output = BVector<T, N>;
 
     fn add(self, rhs: Self) -> Self::Output {

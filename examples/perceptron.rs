@@ -1,4 +1,4 @@
-use only_brain::{ActivationFunction::BinaryStep, Perceptron, bvector};
+use only_brain::{bvector, ActivationFunction::BinaryStep, Perceptron};
 
 fn main() {
     let mut perceptron: Perceptron<2> = Perceptron::new(BinaryStep);
@@ -6,7 +6,6 @@ fn main() {
     let weights = bvector![1.0, 1.0];
     perceptron.set_weights(weights);
     perceptron.set_bias(0.1);
-
     println!("{}", perceptron);
 
     let input = bvector![2.0, -1.0];

@@ -32,9 +32,9 @@
 mod neural_network;
 mod layer;
 mod activation_functions;
+mod perceptron;
 
 mod io;
-mod perceptron;
 mod bvector;
 
 pub use io::*;
