@@ -4,6 +4,8 @@ use only_brain::{dump_model, NeuralNetwork};
 fn main() {
     let mut nn = NeuralNetwork::new(&vec![2, 3, 2]);
 
+    nn.set_activation_function(only_brain::ActivationFunction::BinaryStep);
+
     let first_layer_weights = dmatrix![0.1, 0.2;
                                        0.3, 0.4;
                                        0.5, 0.6];
