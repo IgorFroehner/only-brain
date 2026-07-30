@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use nalgebra::{dmatrix, dvector};
-use only_brain::{dump_model, load_model, ActivationFunction, NeuralNetwork};
+use only_brain::{dump_model, load_model, ActivationFunction, ModelError, NeuralNetwork};
 
 const EPSILON: f64 = 1e-12;
 
@@ -38,8 +38,8 @@ impl Drop for TempModelPath {
     }
 }
 
-fn sample_network() -> NeuralNetwork {
-    let mut nn = NeuralNetwork::new(&vec![2, 3, 2]);
+fn sample_network() -> NeuralNetwork<2, 2> {
+    let mut nn = NeuralNetwork::<2, 2>::new(&[3]);
 
     nn.set_layer_weights(
         1,
@@ -72,7 +72,8 @@ fn a_dumped_model_loads_back_with_identical_structure_and_weights() {
     let original = sample_network();
 
     dump_model(&original, temp.path().to_str().unwrap()).expect("dump should succeed");
-    let loaded = load_model(temp.path().to_str().unwrap()).expect("load should succeed");
+    let loaded: NeuralNetwork<2, 2> =
+        load_model(temp.path().to_str().unwrap()).expect("load should succeed");
 
     assert_eq!(loaded.num_layers(), original.num_layers());
     for layer in 0..original.num_layers() {
@@ -96,11 +97,12 @@ fn a_dumped_model_loads_back_with_identical_structure_and_weights() {
 fn a_loaded_model_produces_the_same_output_as_the_original() {
     let temp = TempModelPath::new("output");
     let original = sample_network();
-    let input = vec![0.5, 0.2];
+    let input = [0.5, 0.2];
     let expected = original.feed_forward(&input);
 
     dump_model(&original, temp.path().to_str().unwrap()).expect("dump should succeed");
-    let loaded = load_model(temp.path().to_str().unwrap()).expect("load should succeed");
+    let loaded: NeuralNetwork<2, 2> =
+        load_model(temp.path().to_str().unwrap()).expect("load should succeed");
 
     assert_all_close(&loaded.feed_forward(&input), &expected);
 }
@@ -112,13 +114,57 @@ fn the_activation_function_survives_a_round_trip() {
     original.set_activation_function(ActivationFunction::BinaryStep);
 
     dump_model(&original, temp.path().to_str().unwrap()).expect("dump should succeed");
-    let loaded = load_model(temp.path().to_str().unwrap()).expect("load should succeed");
+    let loaded: NeuralNetwork<2, 2> =
+        load_model(temp.path().to_str().unwrap()).expect("load should succeed");
 
     assert_eq!(loaded.activation_function(), ActivationFunction::BinaryStep);
     assert_all_close(
-        &loaded.feed_forward(&vec![0.5, 0.2]),
-        &original.feed_forward(&vec![0.5, 0.2]),
+        &loaded.feed_forward(&[0.5, 0.2]),
+        &original.feed_forward(&[0.5, 0.2]),
     );
+}
+
+#[test]
+fn loading_with_the_wrong_output_width_reports_a_dimension_mismatch() {
+    let temp = TempModelPath::new("wrong-out");
+    dump_model(&sample_network(), temp.path().to_str().unwrap()).expect("dump should succeed");
+
+    // The file holds a 2 -> 3 -> 2 network; ask for 2 -> 1.
+    let result = load_model::<2, 1>(temp.path().to_str().unwrap());
+
+    match result {
+        Err(ModelError::DimensionMismatch {
+            end,
+            expected,
+            found,
+        }) => {
+            assert_eq!(end, "output");
+            assert_eq!(expected, 1);
+            assert_eq!(found, 2);
+        }
+        other => panic!("expected a dimension mismatch, got {other:?}"),
+    }
+}
+
+#[test]
+fn loading_with_the_wrong_input_width_reports_a_dimension_mismatch() {
+    let temp = TempModelPath::new("wrong-in");
+    dump_model(&sample_network(), temp.path().to_str().unwrap()).expect("dump should succeed");
+
+    let result = load_model::<5, 2>(temp.path().to_str().unwrap());
+
+    match result {
+        Err(ModelError::DimensionMismatch {
+            end,
+            expected,
+            found,
+        }) => {
+            assert_eq!(end, "input");
+            assert_eq!(expected, 5);
+            assert_eq!(found, 2);
+        }
+        other => panic!("expected a dimension mismatch, got {other:?}"),
+    }
 }
 
 #[test]
@@ -126,7 +172,7 @@ fn loading_a_missing_file_returns_an_error_instead_of_panicking() {
     let missing = std::env::temp_dir().join("only-brain-does-not-exist.bin");
     let _ = fs::remove_file(&missing);
 
-    assert!(load_model(missing.to_str().unwrap()).is_err());
+    assert!(load_model::<2, 2>(missing.to_str().unwrap()).is_err());
 }
 
 #[test]
@@ -134,5 +180,5 @@ fn loading_a_file_that_is_not_a_model_returns_an_error() {
     let temp = TempModelPath::new("garbage");
     fs::write(temp.path(), b"this is not a bincode-encoded model").unwrap();
 
-    assert!(load_model(temp.path().to_str().unwrap()).is_err());
+    assert!(load_model::<2, 2>(temp.path().to_str().unwrap()).is_err());
 }

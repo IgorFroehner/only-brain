@@ -2,7 +2,7 @@ use nalgebra::{dmatrix, dvector};
 use only_brain::{dump_model, NeuralNetwork};
 
 fn main() {
-    let mut nn = NeuralNetwork::new(&vec![2, 3, 2]);
+    let mut nn = NeuralNetwork::<2, 2>::new(&[3]);
 
     nn.set_activation_function(only_brain::ActivationFunction::BinaryStep);
 
@@ -21,8 +21,7 @@ fn main() {
 
     nn.set_weight(1, 0, 0, 0.99);
 
-    let input = vec![0.5, 0.2];
-    let output = nn.feed_forward(&input);
+    let output = nn.feed_forward(&[0.5, 0.2]);
 
     println!("{}", nn);
     println!("Output: {:?}", output);

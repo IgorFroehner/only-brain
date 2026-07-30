@@ -2,7 +2,7 @@ use nalgebra::{dmatrix, dvector};
 use only_brain::{dump_model, load_model, NeuralNetwork};
 
 fn main() {
-    let mut nn = NeuralNetwork::new(&vec![2, 3, 2]);
+    let mut nn = NeuralNetwork::<2, 2>::new(&[3]);
 
     let first_layer_weights = dmatrix![0.1, 0.2;
                                        0.3, 0.4;
@@ -20,7 +20,7 @@ fn main() {
 
     dump_model(&nn, "model.bin").expect("Failed to dump model");
 
-    let nn2 = load_model("model.bin").expect("Failed to load model");
+    let nn2: NeuralNetwork<2, 2> = load_model("model.bin").expect("Failed to load model");
 
     nn2.print();
 }

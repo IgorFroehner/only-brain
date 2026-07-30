@@ -4,7 +4,7 @@ use rand::distr::Uniform;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Layer {
     size: usize,
     weights: DMatrix<f64>,
