@@ -101,7 +101,7 @@ impl NeuralNetwork {
     /// of the layer neurons x layer inputs. The layer index must be greater than 0 since it
     /// corresponds to the layer number that receives these weights.
     pub fn set_layer_weights(&mut self, layer: usize, weights: DMatrix<f64>) {
-        if layer <= 0 {
+        if layer == 0 {
             panic!("Invalid layer index");
         }
         self.layers[layer - 1].set_weights(weights);
@@ -111,7 +111,7 @@ impl NeuralNetwork {
     /// of the layer neurons. The layer index must be greater than 0 since the input layer
     /// does not have biases.
     pub fn set_layer_biases(&mut self, layer: usize, biases: DVector<f64>) {
-        if layer <= 0 {
+        if layer == 0 {
             panic!("Invalid layer index");
         }
         self.layers[layer - 1].set_biases(biases);
@@ -120,7 +120,7 @@ impl NeuralNetwork {
     /// Sets the weight of a specific neuron connection. The layer index must be greater
     /// than 0 since the input layer does not have weights.
     pub fn set_weight(&mut self, layer: usize, neuron: usize, input: usize, weight: f64) {
-        if layer <= 0 {
+        if layer == 0 {
             panic!("Invalid layer index");
         }
         self.layers[layer - 1].set_weight(neuron, input, weight);
@@ -129,7 +129,7 @@ impl NeuralNetwork {
     /// Gets the weight of a specific neuron connection. The layer index must be greater
     /// than 0 since the input layer does not have weights.
     pub fn get_weight(&self, layer: usize, neuron: usize, input: usize) -> f64 {
-        if layer <= 0 {
+        if layer == 0 {
             panic!("Invalid layer index");
         }
         self.layers[layer - 1].weights()[(neuron, input)]

@@ -12,13 +12,13 @@ use std::fmt;
 /// # Example
 /// ```
 /// use only_brain::Perceptron;
-/// use only_brain::activation_functions::ActivationFunction;
+/// use only_brain::ActivationFunction;
 /// use only_brain::bvector;
 ///
 /// fn main() {
 ///     let mut perceptron = Perceptron::<2>::new(ActivationFunction::Sigmoid);
 ///
-///     perceptron.set_weights(bvector![0.5, -0.2, 0.1]);
+///     perceptron.set_weights(bvector![0.5, -0.2]);
 ///     perceptron.set_bias(0.3);
 ///     println!("{}", perceptron);
 ///
@@ -26,6 +26,7 @@ use std::fmt;
 ///     let output = perceptron.feed_forward(&inputs);
 ///     println!("Output: {}", output);
 /// }
+/// ```
 pub struct Perceptron<const N: usize> {
     weigths: BVector<f64, N>,
     bias: f64,

@@ -1,5 +1,5 @@
 
-//! # No Brain
+//! # Only Brain
 //!
 //! A very simple Neural Network library built in Rust with the objective to allow
 //! the user to create, manipulate and train a neural network directly. The user has
@@ -9,7 +9,7 @@
 //! # Example
 //!
 //! ```
-//! use no_brain::NeuralNetwork;
+//! use only_brain::NeuralNetwork;
 //! use nalgebra::dmatrix;
 //! use nalgebra::dvector;
 //!
