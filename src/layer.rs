@@ -1,5 +1,5 @@
 use std::fmt;
-use nalgebra::{DMatrix, DVector};
+use nalgebra::{DMatrix, DVector, DVectorView, DVectorViewMut};
 use rand::distr::Uniform;
 use rand::Rng;
 
@@ -60,9 +60,19 @@ impl Layer {
         })
     }
 
-    pub fn forward(&self, inputs: &DVector<f64>) -> DVector<f64> {
-        let outputs = &self.weights * inputs + &self.biases;
-        outputs.map(get_activation_function(self.activation))
+    /// Computes this layer's outputs into `outputs`, without allocating.
+    ///
+    /// `inputs` must hold exactly [`inputs()`](Self::inputs) values and `outputs`
+    /// exactly [`size()`](Self::size) values.
+    pub fn forward_into(&self, inputs: &[f64], outputs: &mut [f64]) {
+        let inputs = DVectorView::from_slice(inputs, self.inputs());
+        let mut outputs = DVectorViewMut::from_slice(outputs, self.size());
+
+        outputs.gemv(1.0, &self.weights, &inputs, 0.0);
+        outputs += &self.biases;
+
+        let activation = get_activation_function(self.activation);
+        outputs.apply(|x| *x = activation(*x));
     }
 
     /// The number of neurons.

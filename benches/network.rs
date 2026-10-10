@@ -1,0 +1,93 @@
+//! Benchmarks for the operations a training loop leans on.
+//!
+//! `feed_forward` and the flat parameter view run once per fitness evaluation in a
+//! genetic algorithm, so they are measured across the small shapes such networks
+//! actually have, plus one larger shape to show how the costs scale.
+//!
+//! Run with `cargo bench`, or `cargo bench -- feed_forward` for one group.
+
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use rand::rngs::StdRng;
+use rand::SeedableRng;
+use std::hint::black_box;
+
+use only_brain::{read_model, write_model, NeuralNetwork};
+
+/// A deterministic network, so every run measures the same numbers.
+fn network<const IN: usize, const OUT: usize>(hidden: &[usize]) -> NeuralNetwork<IN, OUT> {
+    let mut rng = StdRng::seed_from_u64(42);
+    NeuralNetwork::<IN, OUT>::new_with_rng(hidden, &mut rng)
+}
+
+fn bench_feed_forward(c: &mut Criterion) {
+    let mut group = c.benchmark_group("feed_forward");
+
+    // The kind of network a steering or game-playing genome drives.
+    let tiny = network::<4, 2>(&[6]);
+    group.bench_function(BenchmarkId::from_parameter("4-6-2"), |b| {
+        let inputs = [0.1, -0.2, 0.3, -0.4];
+        b.iter(|| tiny.feed_forward(black_box(&inputs)))
+    });
+
+    let small = network::<16, 4>(&[16, 16]);
+    group.bench_function(BenchmarkId::from_parameter("16-16-16-4"), |b| {
+        let inputs = [0.1; 16];
+        b.iter(|| small.feed_forward(black_box(&inputs)))
+    });
+
+    let medium = network::<64, 10>(&[128, 64]);
+    group.bench_function(BenchmarkId::from_parameter("64-128-64-10"), |b| {
+        let inputs = [0.1; 64];
+        b.iter(|| medium.feed_forward(black_box(&inputs)))
+    });
+
+    group.finish();
+}
+
+/// The genetic algorithm inner loop: genome in, network out, score it.
+fn bench_parameters(c: &mut Criterion) {
+    let mut group = c.benchmark_group("parameters");
+
+    let small = network::<16, 4>(&[16, 16]);
+    let genome = small.parameters();
+
+    group.bench_function("parameters/16-16-16-4", |b| {
+        b.iter(|| black_box(&small).parameters())
+    });
+
+    group.bench_function("set_parameters/16-16-16-4", |b| {
+        let mut nn = small.clone();
+        b.iter(|| nn.set_parameters(black_box(&genome)))
+    });
+
+    group.bench_function("from_parameters/16-16-16-4", |b| {
+        b.iter(|| NeuralNetwork::<16, 4>::from_parameters(&[16, 16], black_box(&genome)))
+    });
+
+    group.finish();
+}
+
+fn bench_model_io(c: &mut Criterion) {
+    let mut group = c.benchmark_group("model_io");
+
+    let medium = network::<64, 10>(&[128, 64]);
+    let mut bytes = Vec::new();
+    write_model(&medium, &mut bytes).expect("writing to a Vec cannot fail");
+
+    group.bench_function("write/64-128-64-10", |b| {
+        let mut buffer = Vec::with_capacity(bytes.len());
+        b.iter(|| {
+            buffer.clear();
+            write_model(black_box(&medium), &mut buffer)
+        })
+    });
+
+    group.bench_function("read/64-128-64-10", |b| {
+        b.iter(|| read_model::<64, 10>(black_box(bytes.as_slice())))
+    });
+
+    group.finish();
+}
+
+criterion_group!(benches, bench_feed_forward, bench_parameters, bench_model_io);
+criterion_main!(benches);

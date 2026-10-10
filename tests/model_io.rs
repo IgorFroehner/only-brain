@@ -474,9 +474,9 @@ fn the_saved_weights_are_the_flat_parameter_view() {
     for layer in 1..nn.num_layers() {
         offset += 5;
         let count = nn.layer_size(layer) * (nn.layer_size(layer - 1) + 1);
-        for chunk in bytes[offset..offset + 8 * count].chunks_exact(8) {
-            floats.push(f64::from_le_bytes(chunk.try_into().unwrap()));
-        }
+        let (chunks, rest) = bytes[offset..offset + 8 * count].as_chunks::<8>();
+        assert!(rest.is_empty());
+        floats.extend(chunks.iter().map(|chunk| f64::from_le_bytes(*chunk)));
         offset += 8 * count;
     }
 
