@@ -1,7 +1,8 @@
 use crate::activation_functions::{get_activation_function, ActivationFunction};
 use crate::layer::Layer;
+use crate::ModelError;
 use nalgebra::{DMatrix, DVector};
-use rand::rng;
+use rand::{rng, Rng};
 use std::fmt;
 use serde::{Deserialize, Serialize};
 
@@ -11,6 +12,10 @@ use serde::{Deserialize, Serialize};
 /// activation function. You can use this struct and its methods to create, manipulate and
 /// even implement your ways to train a neural network.
 ///
+/// The number of input neurons (`IN`) and output neurons (`OUT`) are part of the type,
+/// so feeding a wrongly sized input is a compile error rather than a runtime panic. The
+/// hidden layers stay dynamic and are given at construction time.
+///
 /// # Example
 ///
 /// ```
@@ -18,60 +23,89 @@ use serde::{Deserialize, Serialize};
 /// use nalgebra::dmatrix;
 /// use nalgebra::dvector;
 ///
-/// fn main() {
-///     let mut nn = NeuralNetwork::new(&vec![2, 2, 1]);
+/// // A 2 -> 2 -> 1 network.
+/// let mut nn = NeuralNetwork::<2, 1>::new(&[2]);
 ///
-///     nn.set_layer_weights(1, dmatrix![0.1, 0.2;
-///                                      0.3, 0.4]);
-///     nn.set_layer_biases(1, dvector![0.1, 0.2]);
+/// nn.set_layer_weights(1, dmatrix![0.1, 0.2;
+///                                  0.3, 0.4]);
+/// nn.set_layer_biases(1, dvector![0.1, 0.2]);
 ///
-///     nn.set_layer_weights(2, dmatrix![0.9, 0.8]);
-///     nn.set_layer_biases(2, dvector![0.1]);
+/// nn.set_layer_weights(2, dmatrix![0.9, 0.8]);
+/// nn.set_layer_biases(2, dvector![0.1]);
 ///
-///     let input = vec![0.5, 0.2];
-///     let output = nn.feed_forward(&input);
+/// let output = nn.feed_forward(&[0.5, 0.2]);
 ///
-///     println!("{:?}", output);
-/// }
+/// println!("{:?}", output);
 /// ```
-#[derive(Serialize, Deserialize)]
-pub struct NeuralNetwork {
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "NetworkData")]
+pub struct NeuralNetwork<const IN: usize, const OUT: usize> {
     layers: Vec<Layer>,
     activation_function: Option<ActivationFunction>,
 }
 
-impl NeuralNetwork {
-    /// Creates a new Neural Network with the given layers. The layers vector must contain
-    /// the number of neurons for each layer.
+/// The serialized form of a network, before its shape has been checked.
+///
+/// Deserializing goes through this so that every serde entry point, not only
+/// [`crate::load_model`], rejects layers that do not fit together.
+#[derive(Deserialize)]
+pub(crate) struct NetworkData {
+    layers: Vec<Layer>,
+    activation_function: Option<ActivationFunction>,
+}
+
+impl<const IN: usize, const OUT: usize> NeuralNetwork<IN, OUT> {
+    /// Creates a new Neural Network with the given hidden layer sizes. The input and
+    /// output widths come from the type parameters, so `hidden` lists only the layers
+    /// between them and may be empty.
+    ///
+    /// Weights are initialised at random; use [`NeuralNetwork::new_with_rng`] to control
+    /// the seed.
     ///
     /// # Panics
     ///
-    /// Panics if fewer than two layer sizes are given (a network needs at least an input
-    /// and an output layer), or if any layer size is zero.
+    /// Panics if any hidden layer size is zero. `IN` or `OUT` being zero is a compile
+    /// error.
     ///
     /// # Example
     ///
     /// ```
     /// # use only_brain::NeuralNetwork;
-    /// let nn = NeuralNetwork::new(&vec![2, 2, 1]);
+    /// // 2 -> 2 -> 1
+    /// let nn = NeuralNetwork::<2, 1>::new(&[2]);
+    ///
+    /// // 3 -> 1, no hidden layers
+    /// let direct = NeuralNetwork::<3, 1>::new(&[]);
     /// ```
-    pub fn new(layers: &Vec<usize>) -> Self {
+    pub fn new(hidden: &[usize]) -> Self {
+        Self::new_with_rng(hidden, &mut rng())
+    }
+
+    /// Creates a new Neural Network using the given random number generator.
+    ///
+    /// Seeding the generator makes initialisation reproducible, which is what you want
+    /// in tests and when a training run needs to be repeatable.
+    ///
+    /// # Panics
+    ///
+    /// Panics if any hidden layer size is zero.
+    pub fn new_with_rng<R: Rng>(hidden: &[usize], rng: &mut R) -> Self {
+        const { assert!(IN > 0, "a network needs at least one input neuron") };
+        const { assert!(OUT > 0, "a network needs at least one output neuron") };
         assert!(
-            layers.len() >= 2,
-            "a neural network needs at least an input and an output layer, got {}",
-            layers.len()
-        );
-        assert!(
-            layers.iter().all(|&size| size > 0),
-            "every layer must have at least one neuron, got {layers:?}"
+            hidden.iter().all(|&size| size > 0),
+            "every hidden layer must have at least one neuron, got {hidden:?}"
         );
 
-        let mut rng = rng();
+        let mut sizes = Vec::with_capacity(hidden.len() + 2);
+        sizes.push(IN);
+        sizes.extend_from_slice(hidden);
+        sizes.push(OUT);
 
-        let layers = layers
+        let layers = sizes
             .iter()
-            .zip(layers.iter().skip(1))
-            .map(|(a, b)| Layer::from_size(*b, *a, &mut rng))
+            .zip(sizes.iter().skip(1))
+            .map(|(a, b)| Layer::from_size(*b, *a, rng))
             .collect::<Vec<Layer>>();
 
         Self {
@@ -80,8 +114,9 @@ impl NeuralNetwork {
         }
     }
 
-    /// Feeds the given inputs to the neural network and returns the output. The inputs
-    /// vector must have the same size as the first layer of the network.
+    /// Feeds the given inputs to the neural network and returns the output.
+    ///
+    /// The input and output widths are checked at compile time.
     ///
     /// # Example
     ///
@@ -89,26 +124,26 @@ impl NeuralNetwork {
     /// # use only_brain::NeuralNetwork;
     /// # use nalgebra::dmatrix;
     /// # use nalgebra::dvector;
-    /// # fn main() {
-    /// let mut nn = NeuralNetwork::new(&vec![1, 1]);
+    /// let mut nn = NeuralNetwork::<1, 1>::new(&[]);
     ///
     /// nn.set_layer_weights(1, dmatrix![0.5]);
     /// nn.set_layer_biases(1, dvector![0.5]);
     ///
-    /// let input = vec![0.5];
-    /// let output = nn.feed_forward(&input);
-    /// assert_eq!(output, vec![0.679178699175393]);
-    /// # }
+    /// let output = nn.feed_forward(&[0.5]);
+    /// assert!((output[0] - 0.679178699175393).abs() < 1e-12);
     /// ```
-    pub fn feed_forward(&self, inputs: &Vec<f64>) -> Vec<f64> {
-        let mut outputs = DVector::from(Vec::clone(inputs));
+    pub fn feed_forward(&self, inputs: &[f64; IN]) -> [f64; OUT] {
+        let mut outputs = DVector::from_row_slice(inputs);
         let activation = get_activation_function(self.activation_function());
 
         for layer in &self.layers {
             outputs = layer.forward(&outputs, activation);
         }
 
-        outputs.data.into()
+        // The layer chain is built from IN..OUT and every setter checks its dimensions,
+        // so the final vector always has exactly OUT elements.
+        <[f64; OUT]>::try_from(outputs.as_slice())
+            .expect("output layer width should match the OUT type parameter")
     }
 
     /// Sets the layer weights for the given layer. The weights matrix must have the size
@@ -154,16 +189,12 @@ impl NeuralNetwork {
         self.layers.len() + 1
     }
 
-    /// Returns the number of neurons of the given layer.
+    /// Returns the number of neurons of the given layer. Layer 0 is the input layer.
     pub fn layer_size(&self, layer: usize) -> usize {
         if layer == 0 {
-            return self.input_layer_size();
+            return IN;
         }
         self.layers[layer - 1].size()
-    }
-
-    fn input_layer_size(&self) -> usize {
-        self.layers[0].weights().ncols()
     }
 
     /// Returns the activation function used by every layer of the network.
@@ -180,7 +211,7 @@ impl NeuralNetwork {
     ///
     /// ```
     /// # use only_brain::{ActivationFunction, NeuralNetwork};
-    /// let mut nn = NeuralNetwork::new(&vec![2, 1]);
+    /// let mut nn = NeuralNetwork::<2, 1>::new(&[]);
     /// nn.set_activation_function(ActivationFunction::ReLU);
     ///
     /// assert_eq!(nn.activation_function(), ActivationFunction::ReLU);
@@ -196,12 +227,53 @@ impl NeuralNetwork {
     }
 }
 
-impl fmt::Display for NeuralNetwork {
+impl<const IN: usize, const OUT: usize> TryFrom<NetworkData> for NeuralNetwork<IN, OUT> {
+    type Error = ModelError;
+
+    /// Checks that the stored layers chain from `IN` inputs to `OUT` outputs and that
+    /// each layer agrees with itself.
+    fn try_from(data: NetworkData) -> Result<Self, Self::Error> {
+        let first = data.layers.first().ok_or(ModelError::EmptyNetwork)?;
+        if first.weights().ncols() != IN {
+            return Err(ModelError::DimensionMismatch {
+                end: "input",
+                expected: IN,
+                found: first.weights().ncols(),
+            });
+        }
+
+        let mut inputs = IN;
+        for (index, layer) in data.layers.iter().enumerate() {
+            if let Some(reason) = layer.inconsistency(inputs) {
+                return Err(ModelError::InconsistentLayer {
+                    layer: index + 1,
+                    reason,
+                });
+            }
+            inputs = layer.size();
+        }
+
+        if inputs != OUT {
+            return Err(ModelError::DimensionMismatch {
+                end: "output",
+                expected: OUT,
+                found: inputs,
+            });
+        }
+
+        Ok(Self {
+            layers: data.layers,
+            activation_function: data.activation_function,
+        })
+    }
+}
+
+impl<const IN: usize, const OUT: usize> fmt::Display for NeuralNetwork<IN, OUT> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "Neural Network")?;
         writeln!(f, "Activation Function: {:?}", self.activation_function())?;
         writeln!(f)?;
-        writeln!(f, "Input Layer Size: {}", self.input_layer_size())?;
+        writeln!(f, "Input Layer Size: {IN}")?;
         writeln!(f)?;
         for (index, layer) in self.layers.iter().enumerate() {
             writeln!(f, "Layer {}: {}", index + 1, layer)?;
@@ -226,8 +298,8 @@ mod tests {
     }
 
     /// A 2 -> 1 network with known weights, so outputs can be checked by hand.
-    fn fixed_network() -> NeuralNetwork {
-        let mut nn = NeuralNetwork::new(&vec![2, 1]);
+    fn fixed_network() -> NeuralNetwork<2, 1> {
+        let mut nn = NeuralNetwork::<2, 1>::new(&[]);
         nn.set_layer_weights(1, dmatrix![0.5, -0.25]);
         nn.set_layer_biases(1, dvector![0.1]);
         nn
@@ -235,7 +307,7 @@ mod tests {
 
     #[test]
     fn new_reports_layer_count_and_sizes() {
-        let nn = NeuralNetwork::new(&vec![3, 5, 2]);
+        let nn = NeuralNetwork::<3, 2>::new(&[5]);
 
         assert_eq!(nn.num_layers(), 3);
         assert_eq!(nn.layer_size(0), 3);
@@ -243,22 +315,44 @@ mod tests {
         assert_eq!(nn.layer_size(2), 2);
     }
 
+    /// A network with no hidden layers is still a valid two-layer network. The old
+    /// "fewer than two layers" runtime check is gone because IN and OUT guarantee it.
     #[test]
-    #[should_panic(expected = "at least an input and an output layer")]
-    fn new_rejects_a_single_layer() {
-        NeuralNetwork::new(&vec![3]);
-    }
+    fn new_without_hidden_layers_wires_input_straight_to_output() {
+        let nn = NeuralNetwork::<3, 2>::new(&[]);
 
-    #[test]
-    #[should_panic(expected = "at least an input and an output layer")]
-    fn new_rejects_an_empty_layer_list() {
-        NeuralNetwork::new(&vec![]);
+        assert_eq!(nn.num_layers(), 2);
+        assert_eq!(nn.layer_size(0), 3);
+        assert_eq!(nn.layer_size(1), 2);
     }
 
     #[test]
     #[should_panic(expected = "at least one neuron")]
-    fn new_rejects_a_zero_sized_layer() {
-        NeuralNetwork::new(&vec![2, 0, 1]);
+    fn new_rejects_a_zero_sized_hidden_layer() {
+        NeuralNetwork::<2, 1>::new(&[0]);
+    }
+
+    #[test]
+    fn new_with_rng_is_reproducible_for_the_same_seed() {
+        use rand::SeedableRng;
+
+        let mut first_rng = rand::rngs::StdRng::seed_from_u64(42);
+        let mut second_rng = rand::rngs::StdRng::seed_from_u64(42);
+
+        let first = NeuralNetwork::<3, 2>::new_with_rng(&[4], &mut first_rng);
+        let second = NeuralNetwork::<3, 2>::new_with_rng(&[4], &mut second_rng);
+
+        for layer in 1..first.num_layers() {
+            for neuron in 0..first.layer_size(layer) {
+                for input in 0..first.layer_size(layer - 1) {
+                    assert_eq!(
+                        first.get_weight(layer, neuron, input),
+                        second.get_weight(layer, neuron, input),
+                        "weight differs at layer {layer}, neuron {neuron}, input {input}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
@@ -266,7 +360,7 @@ mod tests {
         let nn = fixed_network();
 
         // 0.5 * 1.0 + (-0.25) * 2.0 + 0.1 = 0.1
-        let output = nn.feed_forward(&vec![1.0, 2.0]);
+        let output = nn.feed_forward(&[1.0, 2.0]);
 
         assert_all_close(&output, &[sigmoid(0.1)]);
     }
@@ -276,7 +370,7 @@ mod tests {
         let nn = fixed_network();
 
         assert_eq!(nn.activation_function(), ActivationFunction::Sigmoid);
-        assert_all_close(&nn.feed_forward(&vec![1.0, 2.0]), &[sigmoid(0.1)]);
+        assert_all_close(&nn.feed_forward(&[1.0, 2.0]), &[sigmoid(0.1)]);
     }
 
     /// The activation function used to be a field with no setter, so every
@@ -295,7 +389,7 @@ mod tests {
             nn.set_activation_function(variant);
 
             assert_eq!(nn.activation_function(), variant);
-            assert_all_close(&nn.feed_forward(&vec![1.0, 2.0]), &[expected(0.1)]);
+            assert_all_close(&nn.feed_forward(&[1.0, 2.0]), &[expected(0.1)]);
         }
     }
 
@@ -305,13 +399,13 @@ mod tests {
         let mut nn = fixed_network();
         nn.set_activation_function(ActivationFunction::BinaryStep);
 
-        assert_all_close(&nn.feed_forward(&vec![1.0, 2.0]), &[1.0]);
-        assert_all_close(&nn.feed_forward(&vec![-1.0, 2.0]), &[0.0]);
+        assert_all_close(&nn.feed_forward(&[1.0, 2.0]), &[1.0]);
+        assert_all_close(&nn.feed_forward(&[-1.0, 2.0]), &[0.0]);
     }
 
     #[test]
     fn set_and_get_weight_round_trip() {
-        let mut nn = NeuralNetwork::new(&vec![2, 2]);
+        let mut nn = NeuralNetwork::<2, 2>::new(&[]);
         nn.set_weight(1, 1, 0, 0.75);
 
         assert_eq!(nn.get_weight(1, 1, 0), 0.75);
@@ -320,21 +414,21 @@ mod tests {
     #[test]
     #[should_panic(expected = "Invalid layer index")]
     fn set_layer_weights_rejects_layer_zero() {
-        let mut nn = NeuralNetwork::new(&vec![2, 1]);
+        let mut nn = NeuralNetwork::<2, 1>::new(&[]);
         nn.set_layer_weights(0, dmatrix![0.5, 0.5]);
     }
 
     #[test]
     #[should_panic(expected = "Incompatible weights matrix size")]
     fn set_layer_weights_rejects_a_mismatched_matrix() {
-        let mut nn = NeuralNetwork::new(&vec![2, 1]);
+        let mut nn = NeuralNetwork::<2, 1>::new(&[]);
         nn.set_layer_weights(1, dmatrix![0.5, 0.5, 0.5]);
     }
 
     #[test]
     #[should_panic(expected = "Incompatible biases vector size")]
     fn set_layer_biases_rejects_a_mismatched_vector() {
-        let mut nn = NeuralNetwork::new(&vec![2, 1]);
+        let mut nn = NeuralNetwork::<2, 1>::new(&[]);
         nn.set_layer_biases(1, dvector![0.1, 0.2]);
     }
 
@@ -358,7 +452,7 @@ mod tests {
 
     #[test]
     fn display_reports_the_input_layer_size() {
-        let nn = NeuralNetwork::new(&vec![4, 2, 1]);
+        let nn = NeuralNetwork::<4, 1>::new(&[2]);
 
         assert!(nn.to_string().contains("Input Layer Size: 4"));
     }

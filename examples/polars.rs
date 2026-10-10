@@ -76,7 +76,7 @@ fn main() -> PolarsResult<()> {
                 weights.get(0) + eta * sp * sl,
                 weights.get(1) + eta * sp * sw,
             ];
-            bias = bias + eta * sp;
+            bias += eta * sp;
             perceptron.set_weights(weights.clone());
             perceptron.set_bias(bias);
         }

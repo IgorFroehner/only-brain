@@ -4,7 +4,7 @@ use rand::distr::Uniform;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Layer {
     size: usize,
     weights: DMatrix<f64>,
@@ -18,14 +18,14 @@ impl Layer {
 
         Self {
             size: neurons,
-            weights: DMatrix::from_fn(neurons, inputs, |_, _| rng.sample(&uniform)),
+            weights: DMatrix::from_fn(neurons, inputs, |_, _| rng.sample(uniform)),
             bias: DVector::from_element(neurons, 0.0),
         }
     }
 
     pub fn forward(&self, inputs: &DVector<f64>, activation_func: fn(f64) -> f64) -> DVector<f64> {
         let outputs = &self.weights * inputs + &self.bias;
-        outputs.map(|x| activation_func(x))
+        outputs.map(activation_func)
     }
 
     pub fn set_weight(&mut self, neuron: usize, input: usize, weight: f64) {
@@ -48,6 +48,24 @@ impl Layer {
             panic!("Incompatible biases vector size");
         }
         self.bias = biases;
+    }
+
+    /// Describes the first way this layer disagrees with itself or with the number of
+    /// inputs it should receive, or returns `None` if it is consistent.
+    ///
+    /// Only a deserialized layer can fail this; the constructor and setters keep it true.
+    pub fn inconsistency(&self, inputs: usize) -> Option<&'static str> {
+        if self.weights.nrows() == 0 {
+            Some("it has no neurons")
+        } else if self.size != self.weights.nrows() {
+            Some("its size does not match its number of weight rows")
+        } else if self.bias.nrows() != self.weights.nrows() {
+            Some("its number of biases does not match its number of neurons")
+        } else if self.weights.ncols() != inputs {
+            Some("its weight columns do not match the previous layer's size")
+        } else {
+            None
+        }
     }
 
     pub fn biases(&self) -> &DVector<f64> {

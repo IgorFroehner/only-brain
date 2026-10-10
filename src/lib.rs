@@ -8,26 +8,27 @@
 //!
 //! # Example
 //!
+//! The input and output widths are part of the network's type, so a wrongly sized
+//! input is a compile error. Hidden layers are given at construction time.
+//!
 //! ```
 //! use only_brain::NeuralNetwork;
 //! use nalgebra::dmatrix;
 //! use nalgebra::dvector;
 //!
-//! fn main() {
-//!     let mut nn = NeuralNetwork::new(&vec![2, 2, 1]);
+//! // A 2 -> 2 -> 1 network.
+//! let mut nn = NeuralNetwork::<2, 1>::new(&[2]);
 //!
-//!     nn.set_layer_weights(1, dmatrix![0.1, 0.2;
-//!                                      0.3, 0.4]);
-//!     nn.set_layer_biases(1, dvector![0.1, 0.2]);
+//! nn.set_layer_weights(1, dmatrix![0.1, 0.2;
+//!                                  0.3, 0.4]);
+//! nn.set_layer_biases(1, dvector![0.1, 0.2]);
 //!
-//!     nn.set_layer_weights(2, dmatrix![0.9, 0.8]);
-//!     nn.set_layer_biases(2, dvector![0.1]);
+//! nn.set_layer_weights(2, dmatrix![0.9, 0.8]);
+//! nn.set_layer_biases(2, dvector![0.1]);
 //!
-//!     let input = vec![0.5, 0.2];
-//!     let output = nn.feed_forward(&input);
+//! let output = nn.feed_forward(&[0.5, 0.2]);
 //!
-//!     println!("{:?}", output);
-//! }
+//! println!("{:?}", output);
 //! ```
 mod neural_network;
 mod layer;
