@@ -7,7 +7,7 @@ description = "A simple Neural Network library, without the learning part."
 readme = "README.md"
 keywords = ["neural-network", "neuroevolution", "machine-learning", "genetic-algorithm"]
 categories = ["science", "algorithms"]
-include = ["src/**/*", "Cargo.toml", "README.md", "LICENSE"]
+include = ["/src/**/*", "/Cargo.toml", "/README.md", "/CHANGELOG.md", "/LICENSE"]
 license = "MIT"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
