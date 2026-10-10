@@ -5,6 +5,10 @@
 Ready to be evolved: everything a genetic algorithm needs to search a network's
 weights.
 
+0.2.0 was never published to crates.io, so this is the first release after 0.1.4
+and it also carries the 0.2.0 changes listed below. Upgrading from 0.1.4 means
+reading both sections.
+
 ### Added
 
 - Flat parameter view: `parameter_count`, `parameter_count_for`, `parameters`,
@@ -41,3 +45,40 @@ weights.
 - The empty `bmatrix` module.
 - The polars dev-dependency: `examples/polars.rs` is now
   `examples/perceptron_iris.rs`, which reads the CSV with the standard library.
+
+## 0.2.0
+
+Never published; its changes ship in 0.3.0.
+
+### Added
+
+- `Perceptron`, a single neuron over a compile-time-sized `BVector`, with the
+  `bvector!` macro.
+- `set_activation_function`, which had no setter before, so every network ran
+  sigmoid.
+- `new_with_rng`, for reproducible initialisation.
+- `layer_weights`, `layer_biases`, `set_bias` and `get_bias`.
+- `ModelError`, a typed error for saving and loading.
+- `Debug`, `Clone` and `PartialEq` on the public types.
+
+### Changed
+
+- **Breaking:** the input and output widths are part of the type:
+  `NeuralNetwork<IN, OUT>`. `new` takes only the hidden layer sizes as a slice, and
+  `feed_forward` takes `&[f64; IN]` and returns `[f64; OUT]`, so a wrongly sized
+  input is a compile error.
+- **Breaking:** `set_layer_weights` takes one row per neuron as nested arrays or
+  `Vec<Vec<f64>>`, and `set_layer_biases` takes `&[f64]`, instead of nalgebra's
+  `DMatrix` and `DVector`.
+- **Breaking:** `dump_model` and `load_model` take `impl AsRef<Path>` and return
+  `ModelError` instead of `Box<dyn Error>`.
+- Loading checks that every layer fits its neighbours and the requested widths,
+  instead of panicking later in `feed_forward`. Deserializing through serde runs the
+  same checks.
+- Reads and writes are buffered.
+- rand 0.9 and nalgebra 0.34.
+
+### Fixed
+
+- A network using `BinaryStep` panicked on every forward pass.
+- `Display` printed a function pointer address instead of the activation's name.
