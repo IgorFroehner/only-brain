@@ -5,7 +5,10 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use nalgebra::{DMatrix, DVector};
-use only_brain::{dump_model, load_model, ActivationFunction, ModelError, NeuralNetwork};
+use only_brain::{
+    dump_model, load_model, read_model, write_model, ActivationFunction, ModelError,
+    NeuralNetwork, MODEL_FORMAT_VERSION,
+};
 
 const EPSILON: f64 = 1e-12;
 
@@ -99,20 +102,32 @@ fn a_loaded_model_produces_the_same_output_as_the_original() {
 }
 
 #[test]
-fn the_activation_function_survives_a_round_trip() {
+fn per_layer_activation_functions_survive_a_round_trip() {
     let temp = TempModelPath::new("activation");
     let mut original = sample_network();
-    original.set_activation_function(ActivationFunction::BinaryStep);
+    original.set_activation_function(ActivationFunction::ReLU);
+    original.set_output_activation(ActivationFunction::Tanh);
 
     dump_model(&original, temp.path()).expect("dump should succeed");
     let loaded: NeuralNetwork<2, 2> =
         load_model(temp.path()).expect("load should succeed");
 
-    assert_eq!(loaded.activation_function(), ActivationFunction::BinaryStep);
-    assert_all_close(
-        &loaded.feed_forward(&[0.5, 0.2]),
-        &original.feed_forward(&[0.5, 0.2]),
-    );
+    assert_eq!(loaded.layer_activation(1), ActivationFunction::ReLU);
+    assert_eq!(loaded.layer_activation(2), ActivationFunction::Tanh);
+    assert_eq!(loaded, original);
+}
+
+#[test]
+fn every_activation_function_survives_a_round_trip() {
+    for activation in ActivationFunction::ALL {
+        let mut original = sample_network();
+        original.set_output_activation(activation);
+
+        let loaded: NeuralNetwork<2, 2> = read_model(to_bytes(&original).as_slice())
+            .expect("read should succeed");
+
+        assert_eq!(loaded.output_activation(), activation);
+    }
 }
 
 #[test]
@@ -158,8 +173,9 @@ fn loading_with_the_wrong_input_width_reports_a_dimension_mismatch() {
     }
 }
 
-/// Mirrors the on-disk layout of a network so tests can write files that the
-/// public API would never produce.
+/// Mirrors the pre-0.3 on-disk layout of a network, the bincode 1 encoding of nalgebra
+/// matrices, so tests can write legacy files, including ones the old API would never
+/// have produced.
 #[derive(serde::Serialize)]
 struct RawLayer {
     size: usize,
@@ -182,9 +198,17 @@ fn raw_layer(neurons: usize, inputs: usize) -> RawLayer {
 }
 
 fn write_raw(temp: &TempModelPath, layers: Vec<RawLayer>) {
+    write_raw_with_activation(temp, layers, None);
+}
+
+fn write_raw_with_activation(
+    temp: &TempModelPath,
+    layers: Vec<RawLayer>,
+    activation_function: Option<ActivationFunction>,
+) {
     let raw = RawNetwork {
         layers,
-        activation_function: None,
+        activation_function,
     };
     fs::write(temp.path(), bincode::serialize(&raw).unwrap()).unwrap();
 }
@@ -197,13 +221,58 @@ fn assert_inconsistent_layer(result: Result<NeuralNetwork<2, 2>, ModelError>, ex
 }
 
 #[test]
-fn the_raw_mirror_matches_the_real_format() {
+fn a_legacy_file_loads() {
     let temp = TempModelPath::new("raw-mirror");
     write_raw(&temp, vec![raw_layer(3, 2), raw_layer(2, 3)]);
 
-    let loaded = load_model::<2, 2>(temp.path()).expect("a well-formed raw file should load");
+    let loaded = load_model::<2, 2>(temp.path()).expect("a well-formed legacy file should load");
 
     assert_eq!(loaded.layer_size(1), 3);
+    assert_eq!(loaded.layer_weights(1), vec![vec![0.5; 2]; 3]);
+    assert_eq!(loaded.layer_biases(2), &[0.1, 0.1]);
+    // No stored activation meant sigmoid.
+    assert_eq!(loaded.layer_activation(1), ActivationFunction::Sigmoid);
+    assert_eq!(loaded.output_activation(), ActivationFunction::Sigmoid);
+}
+
+/// Legacy files store the matrix column by column; the loader must not transpose it.
+#[test]
+fn a_legacy_file_keeps_each_weight_in_its_place() {
+    let temp = TempModelPath::new("raw-order");
+    let mut first = raw_layer(3, 2);
+    first.weights = DMatrix::from_row_slice(3, 2, &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+    write_raw(&temp, vec![first, raw_layer(2, 3)]);
+
+    let loaded = load_model::<2, 2>(temp.path()).expect("legacy file should load");
+
+    assert_eq!(
+        loaded.layer_weights(1),
+        vec![vec![1.0, 2.0], vec![3.0, 4.0], vec![5.0, 6.0]]
+    );
+}
+
+/// Legacy files had one activation for the whole network; every layer now gets it.
+#[test]
+fn a_legacy_network_wide_activation_applies_to_every_layer() {
+    let temp = TempModelPath::new("raw-activation");
+    write_raw_with_activation(
+        &temp,
+        vec![raw_layer(3, 2), raw_layer(2, 3)],
+        Some(ActivationFunction::Tanh),
+    );
+
+    let loaded = load_model::<2, 2>(temp.path()).expect("legacy file should load");
+
+    assert_eq!(loaded.layer_activation(1), ActivationFunction::Tanh);
+    assert_eq!(loaded.layer_activation(2), ActivationFunction::Tanh);
+}
+
+#[test]
+fn a_legacy_file_with_no_layers_reports_an_empty_network() {
+    let temp = TempModelPath::new("raw-empty");
+    write_raw(&temp, vec![]);
+
+    assert!(matches!(load_model::<2, 2>(temp.path()), Err(ModelError::EmptyNetwork)));
 }
 
 #[test]
@@ -238,17 +307,38 @@ fn loading_rejects_a_size_field_that_disagrees_with_the_weights() {
     assert_inconsistent_layer(load_model(temp.path()), 2);
 }
 
+#[test]
+fn serde_round_trips_through_a_plain_readable_form() {
+    let mut original = NeuralNetwork::<2, 1>::new(&[]);
+    original.set_layer_weights(1, &[[0.5, -0.25]]);
+    original.set_layer_biases(1, &[0.1]);
+    original.set_output_activation(ActivationFunction::Tanh);
+
+    let json = serde_json::to_string(&original).unwrap();
+    assert_eq!(
+        json,
+        r#"{"layers":[{"activation":"Tanh","weights":[[0.5,-0.25]],"biases":[0.1]}]}"#
+    );
+
+    let loaded: NeuralNetwork<2, 1> = serde_json::from_str(&json).unwrap();
+    assert_eq!(loaded, original);
+}
+
 /// Validation lives in `Deserialize` itself, so other serde entry points cannot
 /// skip it.
 #[test]
 fn deserializing_directly_also_validates() {
-    let raw = RawNetwork {
-        layers: vec![raw_layer(3, 2), raw_layer(2, 4)],
-        activation_function: None,
-    };
-    let bytes = bincode::serialize(&raw).unwrap();
+    let broken_chain = r#"{"layers":[
+        {"activation":"Tanh","weights":[[1,2],[3,4],[5,6]],"biases":[0,0,0]},
+        {"activation":"Tanh","weights":[[1,2,3,4],[1,2,3,4]],"biases":[0,0]}
+    ]}"#;
+    let wrong_output = r#"{"layers":[
+        {"activation":"Tanh","weights":[[1,2]],"biases":[0]}
+    ]}"#;
 
-    assert!(bincode::deserialize::<NeuralNetwork<2, 2>>(&bytes).is_err());
+    let error = serde_json::from_str::<NeuralNetwork<2, 2>>(broken_chain).unwrap_err();
+    assert!(error.to_string().contains("layer 2"), "unexpected error: {error}");
+    assert!(serde_json::from_str::<NeuralNetwork<2, 2>>(wrong_output).is_err());
 }
 
 #[test]
@@ -260,11 +350,163 @@ fn loading_a_missing_file_returns_an_error_instead_of_panicking() {
 }
 
 #[test]
-fn loading_a_file_that_is_not_a_model_returns_an_error() {
+fn loading_a_file_that_is_not_a_model_reports_an_unrecognized_format() {
     let temp = TempModelPath::new("garbage");
     fs::write(temp.path(), b"this is not a bincode-encoded model").unwrap();
 
-    assert!(load_model::<2, 2>(temp.path()).is_err());
+    assert!(matches!(
+        load_model::<2, 2>(temp.path()),
+        Err(ModelError::UnrecognizedFormat)
+    ));
+}
+
+#[test]
+fn loading_an_empty_file_reports_an_unrecognized_format() {
+    let temp = TempModelPath::new("empty");
+    fs::write(temp.path(), b"").unwrap();
+
+    assert!(matches!(
+        load_model::<2, 2>(temp.path()),
+        Err(ModelError::UnrecognizedFormat)
+    ));
+}
+
+fn to_bytes<const IN: usize, const OUT: usize>(nn: &NeuralNetwork<IN, OUT>) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    write_model(nn, &mut bytes).expect("writing to memory should succeed");
+    bytes
+}
+
+#[test]
+fn a_saved_model_starts_with_the_magic_and_the_format_version() {
+    let bytes = to_bytes(&sample_network());
+
+    assert_eq!(&bytes[..8], b"ONLYBRN\0");
+    assert_eq!(u16::from_le_bytes([bytes[8], bytes[9]]), MODEL_FORMAT_VERSION);
+}
+
+#[test]
+fn a_model_from_a_newer_format_version_is_reported_as_unsupported() {
+    let mut bytes = to_bytes(&sample_network());
+    bytes[8..10].copy_from_slice(&(MODEL_FORMAT_VERSION + 1).to_le_bytes());
+
+    match read_model::<2, 2>(bytes.as_slice()) {
+        Err(ModelError::UnsupportedVersion { found, newest }) => {
+            assert_eq!(found, MODEL_FORMAT_VERSION + 1);
+            assert_eq!(newest, MODEL_FORMAT_VERSION);
+        }
+        other => panic!("expected an unsupported version, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_truncated_model_is_reported_as_malformed() {
+    let bytes = to_bytes(&sample_network());
+
+    for length in [9, 12, 20, bytes.len() - 1] {
+        assert!(
+            matches!(
+                read_model::<2, 2>(&bytes[..length]),
+                Err(ModelError::Malformed { .. })
+            ),
+            "a model cut at {length} bytes should be malformed"
+        );
+    }
+}
+
+#[test]
+fn an_unknown_activation_code_is_reported_as_malformed() {
+    let mut bytes = to_bytes(&sample_network());
+    // magic (8) + version (2) + inputs (4) + layers (4) + first layer's neurons (4)
+    bytes[22] = 200;
+
+    assert!(matches!(
+        read_model::<2, 2>(bytes.as_slice()),
+        Err(ModelError::Malformed { .. })
+    ));
+}
+
+#[test]
+fn a_corrupted_neuron_count_fails_instead_of_exhausting_memory() {
+    let mut bytes = to_bytes(&sample_network());
+    bytes[18..22].copy_from_slice(&u32::MAX.to_le_bytes());
+
+    assert!(read_model::<2, 2>(bytes.as_slice()).is_err());
+}
+
+#[test]
+fn a_file_with_data_after_the_model_is_reported_as_malformed() {
+    let temp = TempModelPath::new("trailing");
+    let mut bytes = to_bytes(&sample_network());
+    bytes.push(0);
+    fs::write(temp.path(), bytes).unwrap();
+
+    assert!(matches!(
+        load_model::<2, 2>(temp.path()),
+        Err(ModelError::Malformed { .. })
+    ));
+}
+
+#[test]
+fn several_models_can_be_read_from_one_stream() {
+    let first = sample_network();
+    let second = NeuralNetwork::<3, 1>::new(&[4]);
+    let mut stream = to_bytes(&first);
+    stream.extend(to_bytes(&second));
+
+    let mut reader = stream.as_slice();
+    let read_first: NeuralNetwork<2, 2> = read_model(&mut reader).unwrap();
+    let read_second: NeuralNetwork<3, 1> = read_model(&mut reader).unwrap();
+
+    assert_eq!(read_first, first);
+    assert_eq!(read_second, second);
+    assert!(reader.is_empty());
+}
+
+#[test]
+fn the_saved_weights_are_the_flat_parameter_view() {
+    let nn = sample_network();
+    let bytes = to_bytes(&nn);
+
+    // After the 18-byte header, each layer is 5 bytes of shape then its parameters.
+    let mut floats = Vec::new();
+    let mut offset = 18;
+    for layer in 1..nn.num_layers() {
+        offset += 5;
+        let count = nn.layer_size(layer) * (nn.layer_size(layer - 1) + 1);
+        for chunk in bytes[offset..offset + 8 * count].chunks_exact(8) {
+            floats.push(f64::from_le_bytes(chunk.try_into().unwrap()));
+        }
+        offset += 8 * count;
+    }
+
+    assert_eq!(offset, bytes.len());
+    assert_eq!(floats, nn.parameters());
+}
+
+/// The network stored in `tests/fixtures/v1_model.bin`.
+fn v1_fixture_network() -> NeuralNetwork<2, 2> {
+    let mut nn = sample_network();
+    nn.set_layer_activation(1, ActivationFunction::Tanh);
+    nn.set_output_activation(ActivationFunction::Identity);
+    nn
+}
+
+/// Saved models must keep loading, and saving must keep producing the same bytes
+/// until the format version changes. Regenerate the fixture only together with a new
+/// format version, by running this test with `ONLY_BRAIN_BLESS=1`.
+#[test]
+fn the_version_1_format_is_stable() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/v1_model.bin");
+    let expected = v1_fixture_network();
+
+    if std::env::var_os("ONLY_BRAIN_BLESS").is_some() {
+        dump_model(&expected, &path).expect("writing the fixture should succeed");
+    }
+
+    let loaded: NeuralNetwork<2, 2> = load_model(&path).expect("version 1 model should load");
+    assert_eq!(loaded, expected);
+    assert_eq!(to_bytes(&expected), fs::read(&path).unwrap());
 }
 
 /// Written by 0.1.x (`examples/neural_network.rs`). The format must stay loadable.
@@ -275,7 +517,8 @@ fn a_model_written_by_an_earlier_version_still_loads() {
     let loaded: NeuralNetwork<2, 2> = load_model(path).expect("0.1.x model should load");
 
     assert_eq!(loaded.layer_size(1), 3);
-    assert_eq!(loaded.activation_function(), ActivationFunction::BinaryStep);
+    assert_eq!(loaded.layer_activation(1), ActivationFunction::BinaryStep);
+    assert_eq!(loaded.output_activation(), ActivationFunction::BinaryStep);
     assert_eq!(loaded.get_weight(1, 0, 0), 0.99);
     assert_eq!(loaded.get_weight(2, 1, 2), 0.4);
 }

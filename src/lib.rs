@@ -1,4 +1,3 @@
-
 //! # Only Brain
 //!
 //! A very simple Neural Network library built in Rust with the objective to allow
@@ -30,6 +29,38 @@
 //!
 //! println!("{:?}", output);
 //! ```
+//!
+//! # Training it your way
+//!
+//! The library leaves learning to you. Two views of the same network make that easy:
+//!
+//! - **Per layer**: [`NeuralNetwork::layer_weights`], [`NeuralNetwork::set_layer_biases`]
+//!   and friends, for methods that reason about layers, such as backpropagation.
+//! - **Flat**: [`NeuralNetwork::parameters`], [`NeuralNetwork::set_parameters`] and
+//!   [`NeuralNetwork::from_parameters`], for methods that search a list of numbers,
+//!   such as genetic algorithms. A genome of
+//!   [`NeuralNetwork::parameter_count_for`] genes is a network.
+//!
+//! ```
+//! use only_brain::{ActivationFunction, NeuralNetwork};
+//!
+//! /// Scores a genome, as a genetic algorithm's fitness function would.
+//! fn fitness(genome: &[f64]) -> f64 {
+//!     let mut nn = NeuralNetwork::<2, 1>::from_parameters(&[3], genome);
+//!     nn.set_activation_function(ActivationFunction::Tanh);
+//!     nn.set_output_activation(ActivationFunction::Sigmoid);
+//!
+//!     let [output] = nn.feed_forward(&[1.0, 0.0]);
+//!     -(1.0 - output).powi(2)
+//! }
+//!
+//! let genome = vec![0.1; NeuralNetwork::<2, 1>::parameter_count_for(&[3])];
+//! println!("fitness: {}", fitness(&genome));
+//! ```
+//!
+//! Each layer has its own [`ActivationFunction`], and [`dump_model`] and
+//! [`load_model`] save and load networks in a versioned format that keeps reading
+//! files written by earlier versions.
 mod neural_network;
 mod layer;
 mod activation_functions;
@@ -44,3 +75,8 @@ pub use perceptron::*;
 pub use activation_functions::*;
 pub use bvector::*;
 
+
+/// Compiles and runs the README's examples as doctests, so they cannot go stale.
+#[doc = include_str!("../README.md")]
+#[cfg(doctest)]
+pub struct ReadmeDoctests;
