@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.3.1
+
+Faster `feed_forward` and model files, with no interface changes.
+
+### Added
+
+- `BVector::is_empty`.
+- Criterion benchmarks (`cargo bench`) for `feed_forward`, the flat parameter view
+  and model reading and writing.
+
+### Changed
+
+- `feed_forward` allocates once per call instead of twice per layer: 22% to 54%
+  faster depending on the network's shape.
+- `write_model` writes straight from the layers instead of copying every weight
+  first: 42% faster on a 64-128-64-10 network.
+- `read_model` reads up to 512 floats at a time instead of one: 23% faster on a
+  64-128-64-10 network.
+
+### Fixed
+
+- The `bvector!` examples named a `barray!` macro that doesn't exist.
+
 ## 0.3.0
 
 Ready to be evolved: everything a genetic algorithm needs to search a network's
