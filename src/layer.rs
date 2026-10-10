@@ -2,38 +2,89 @@ use std::fmt;
 use nalgebra::{DMatrix, DVector};
 use rand::distr::Uniform;
 use rand::Rng;
-use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+use crate::activation_functions::{get_activation_function, ActivationFunction};
+
+/// One layer of neurons: a weight matrix with one row per neuron and one column per
+/// input, a bias per neuron, and the activation applied to every neuron.
+#[derive(Debug, Clone, PartialEq)]
 pub struct Layer {
-    size: usize,
     weights: DMatrix<f64>,
-    bias: DVector<f64>,
+    biases: DVector<f64>,
+    activation: ActivationFunction,
 }
 
 impl Layer {
-    pub fn from_size<T: Rng>(neurons: usize, inputs: usize, rng: &mut T) -> Self {
-        // rand 0.9: Uniform::new(low, high) returns Result; unwrap to get distribution
-        let uniform = Uniform::new(-1.0f64, 1.0f64).unwrap();
+    /// A layer with weights drawn uniformly from `[-1, 1)` and zero biases.
+    pub fn random<T: Rng>(neurons: usize, inputs: usize, activation: ActivationFunction, rng: &mut T) -> Self {
+        let uniform = Uniform::new(-1.0f64, 1.0f64).expect("the range -1..1 is valid");
 
         Self {
-            size: neurons,
             weights: DMatrix::from_fn(neurons, inputs, |_, _| rng.sample(uniform)),
-            bias: DVector::from_element(neurons, 0.0),
+            biases: DVector::zeros(neurons),
+            activation,
         }
     }
 
-    pub fn forward(&self, inputs: &DVector<f64>, activation_func: fn(f64) -> f64) -> DVector<f64> {
-        let outputs = &self.weights * inputs + &self.bias;
-        outputs.map(activation_func)
+    /// A layer whose weights and biases are all zero.
+    pub fn zeros(neurons: usize, inputs: usize, activation: ActivationFunction) -> Self {
+        Self {
+            weights: DMatrix::zeros(neurons, inputs),
+            biases: DVector::zeros(neurons),
+            activation,
+        }
+    }
+
+    /// Builds a layer from one weight row per neuron, or describes why the parts do
+    /// not form a layer that takes `inputs` inputs.
+    pub fn from_parts(
+        rows: &[Vec<f64>],
+        biases: &[f64],
+        activation: ActivationFunction,
+        inputs: usize,
+    ) -> Result<Self, &'static str> {
+        if rows.is_empty() {
+            return Err("it has no neurons");
+        }
+        if rows.iter().any(|row| row.len() != inputs) {
+            return Err("its weight rows do not match the previous layer's size");
+        }
+        if biases.len() != rows.len() {
+            return Err("its number of biases does not match its number of neurons");
+        }
+
+        Ok(Self {
+            weights: DMatrix::from_fn(rows.len(), inputs, |neuron, input| rows[neuron][input]),
+            biases: DVector::from_row_slice(biases),
+            activation,
+        })
+    }
+
+    pub fn forward(&self, inputs: &DVector<f64>) -> DVector<f64> {
+        let outputs = &self.weights * inputs + &self.biases;
+        outputs.map(get_activation_function(self.activation))
+    }
+
+    /// The number of neurons.
+    pub fn size(&self) -> usize {
+        self.weights.nrows()
+    }
+
+    /// The number of inputs each neuron receives.
+    pub fn inputs(&self) -> usize {
+        self.weights.ncols()
+    }
+
+    pub fn activation(&self) -> ActivationFunction {
+        self.activation
+    }
+
+    pub fn set_activation(&mut self, activation: ActivationFunction) {
+        self.activation = activation;
     }
 
     pub fn set_weight(&mut self, neuron: usize, input: usize, weight: f64) {
         self.weights[(neuron, input)] = weight;
-    }
-
-    pub fn size(&self) -> usize {
-        self.size
     }
 
     /// Replaces every weight, given one row per neuron with one entry per input.
@@ -46,14 +97,14 @@ impl Layer {
     }
 
     pub fn set_biases(&mut self, biases: &[f64]) {
-        if biases.len() != self.bias.nrows() {
-            panic!("Incompatible biases vector size: expected {} biases", self.bias.nrows());
+        if biases.len() != self.biases.nrows() {
+            panic!("Incompatible biases vector size: expected {} biases", self.biases.nrows());
         }
-        self.bias.copy_from_slice(biases);
+        self.biases.copy_from_slice(biases);
     }
 
     pub fn set_bias(&mut self, neuron: usize, bias: f64) {
-        self.bias[neuron] = bias;
+        self.biases[neuron] = bias;
     }
 
     /// The weights as one row per neuron, each holding one weight per input.
@@ -61,36 +112,54 @@ impl Layer {
         self.weights.row_iter().map(|row| row.iter().copied().collect()).collect()
     }
 
-    /// Describes the first way this layer disagrees with itself or with the number of
-    /// inputs it should receive, or returns `None` if it is consistent.
-    ///
-    /// Only a deserialized layer can fail this; the constructor and setters keep it true.
-    pub fn inconsistency(&self, inputs: usize) -> Option<&'static str> {
-        if self.weights.nrows() == 0 {
-            Some("it has no neurons")
-        } else if self.size != self.weights.nrows() {
-            Some("its size does not match its number of weight rows")
-        } else if self.bias.nrows() != self.weights.nrows() {
-            Some("its number of biases does not match its number of neurons")
-        } else if self.weights.ncols() != inputs {
-            Some("its weight columns do not match the previous layer's size")
-        } else {
-            None
-        }
-    }
-
     pub fn biases(&self) -> &DVector<f64> {
-        &self.bias
+        &self.biases
     }
 
     pub fn weights(&self) -> &DMatrix<f64> {
         &self.weights
     }
+
+    /// How many values this layer contributes to the network's flat parameter view.
+    pub fn parameter_count(&self) -> usize {
+        Self::parameter_count_for(self.size(), self.inputs())
+    }
+
+    pub fn parameter_count_for(neurons: usize, inputs: usize) -> usize {
+        neurons * (inputs + 1)
+    }
+
+    /// Appends this layer's parameters: the weights row by row, then the biases.
+    pub fn extend_parameters(&self, parameters: &mut Vec<f64>) {
+        for row in self.weights.row_iter() {
+            parameters.extend(row.iter());
+        }
+        parameters.extend(self.biases.iter());
+    }
+
+    /// Reads this layer's parameters, in the order of [`Layer::extend_parameters`], from
+    /// the front of `parameters`, and returns what is left.
+    pub fn take_parameters<'a>(&mut self, parameters: &'a [f64]) -> &'a [f64] {
+        let (neurons, inputs) = self.weights.shape();
+        let (weights, rest) = parameters.split_at(neurons * inputs);
+        let (biases, rest) = rest.split_at(neurons);
+
+        // The slice is row-major and nalgebra stores columns, so copy element by element.
+        for (neuron, row) in weights.chunks_exact(inputs).enumerate() {
+            for (input, &weight) in row.iter().enumerate() {
+                self.weights[(neuron, input)] = weight;
+            }
+        }
+        self.biases.copy_from_slice(biases);
+
+        rest
+    }
 }
 
 impl fmt::Display for Layer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "Layer Size: {}", self.size)?;
+        writeln!(f, "Layer Size: {}", self.size())?;
+        writeln!(f, "Activation Function: {:?}", self.activation)?;
         writeln!(f, "Weights:")?;
         for i in 0..self.weights.nrows() {
             for j in 0..self.weights.ncols() {
@@ -99,7 +168,7 @@ impl fmt::Display for Layer {
             writeln!(f)?;
         }
         writeln!(f, "Biases:")?;
-        for bias in self.bias.iter() {
+        for bias in self.biases.iter() {
             writeln!(f, "{:0.2}", bias)?;
         }
         Ok(())
