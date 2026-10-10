@@ -60,8 +60,8 @@ impl<T: SimdRealField + Copy, const N: usize> ops::Add for BVector<T, N> {
 /// number of elements provided.
 ///
 /// Example:
-/// - `let v = barray![1.0, 2.0, 3.0]; // BVector<f64, 3>`
-/// - `let v = barray![2.0, -1.5]; // BVector<f64, 2>`
+/// - `let v = bvector![1.0, 2.0, 3.0]; // BVector<f64, 3>`
+/// - `let v = bvector![2.0, -1.5]; // BVector<f64, 2>`
 #[macro_export]
 macro_rules! bvector {
     ($($x:expr),+ $(,)?) => {
