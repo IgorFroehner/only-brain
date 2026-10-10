@@ -1,7 +1,6 @@
 use crate::activation_functions::ActivationFunction;
 use crate::layer::Layer;
 use crate::ModelError;
-use nalgebra::DVector;
 use rand::{rng, Rng};
 use std::fmt;
 use serde::{Deserialize, Serialize};
@@ -219,15 +218,24 @@ impl<const IN: usize, const OUT: usize> NeuralNetwork<IN, OUT> {
     /// assert!((output[0] - 0.679178699175393).abs() < 1e-12);
     /// ```
     pub fn feed_forward(&self, inputs: &[f64; IN]) -> [f64; OUT] {
-        let mut outputs = DVector::from_row_slice(inputs);
+        // One scratch allocation split into two halves that the layers ping-pong
+        // between, each wide enough for the widest layer.
+        let widest = self.layers.iter().map(Layer::size).fold(IN, usize::max);
+        let mut scratch = vec![0.0; widest * 2];
+        let (mut current, mut next) = scratch.split_at_mut(widest);
+
+        current[..IN].copy_from_slice(inputs);
+        let mut width = IN;
 
         for layer in &self.layers {
-            outputs = layer.forward(&outputs);
+            layer.forward_into(&current[..width], &mut next[..layer.size()]);
+            width = layer.size();
+            std::mem::swap(&mut current, &mut next);
         }
 
         // The layer chain is built from IN..OUT and every setter checks its dimensions,
-        // so the final vector always has exactly OUT elements.
-        <[f64; OUT]>::try_from(outputs.as_slice())
+        // so the final slice always has exactly OUT elements.
+        <[f64; OUT]>::try_from(&current[..width])
             .expect("output layer width should match the OUT type parameter")
     }
 
@@ -378,6 +386,11 @@ impl<const IN: usize, const OUT: usize> NeuralNetwork<IN, OUT> {
             panic!("Invalid layer index");
         }
         &self.layers[layer - 1]
+    }
+
+    /// Every layer after the input layer, for the model writer.
+    pub(crate) fn layers(&self) -> &[Layer] {
+        &self.layers
     }
 
     fn layer_mut(&mut self, layer: usize) -> &mut Layer {
