@@ -196,18 +196,24 @@ pub fn write_model<const IN: usize, const OUT: usize>(
     model: &NeuralNetwork<IN, OUT>,
     mut writer: impl Write,
 ) -> Result<(), ModelError> {
-    let data = NetworkData::from(model);
-    let mut bytes = Vec::with_capacity(MAGIC.len() + 10 + 8 * model.parameter_count() + 5 * data.layers.len());
+    let layers = model.layers();
+    let mut bytes = Vec::with_capacity(MAGIC.len() + 10 + 8 * model.parameter_count() + 5 * layers.len());
 
     bytes.extend_from_slice(&MAGIC);
     bytes.extend_from_slice(&MODEL_FORMAT_VERSION.to_le_bytes());
     bytes.extend_from_slice(&format_count(IN).to_le_bytes());
-    bytes.extend_from_slice(&format_count(data.layers.len()).to_le_bytes());
+    bytes.extend_from_slice(&format_count(layers.len()).to_le_bytes());
 
-    for layer in &data.layers {
-        bytes.extend_from_slice(&format_count(layer.weights.len()).to_le_bytes());
-        bytes.push(layer.activation.code());
-        for value in layer.weights.iter().flatten().chain(&layer.biases) {
+    for layer in layers {
+        bytes.extend_from_slice(&format_count(layer.size()).to_le_bytes());
+        bytes.push(layer.activation().code());
+        // The weights row by row, then the biases: the flat parameter view.
+        for row in layer.weights().row_iter() {
+            for value in &row {
+                bytes.extend_from_slice(&value.to_le_bytes());
+            }
+        }
+        for value in layer.biases() {
             bytes.extend_from_slice(&value.to_le_bytes());
         }
     }
@@ -290,24 +296,38 @@ fn format_count(count: usize) -> u32 {
     u32::try_from(count).expect("a layer cannot have more than u32::MAX neurons")
 }
 
+/// Reads exactly enough bytes to fill `bytes`, reporting a short read as a malformed
+/// model.
+fn fill(reader: &mut impl Read, bytes: &mut [u8]) -> Result<(), ModelError> {
+    reader.read_exact(bytes).map_err(|error| match error.kind() {
+        std::io::ErrorKind::UnexpectedEof => ModelError::Malformed {
+            reason: "the data ends before the model does",
+        },
+        _ => ModelError::Io(error),
+    })
+}
+
+/// How many floats [`Decoder::f64s`] reads per chunk.
+const DECODE_CHUNK: usize = 512;
+
 /// Reads little-endian values, reporting a short read as a malformed model.
 struct Decoder<R> {
     reader: R,
+    /// Scratch for bulk reads, so each read does not initialise its own buffer.
+    buffer: Box<[u8; 8 * DECODE_CHUNK]>,
 }
 
 impl<R: Read> Decoder<R> {
     fn new(reader: R) -> Self {
-        Self { reader }
+        Self {
+            reader,
+            buffer: Box::new([0; 8 * DECODE_CHUNK]),
+        }
     }
 
     fn bytes<const N: usize>(&mut self) -> Result<[u8; N], ModelError> {
         let mut bytes = [0; N];
-        self.reader.read_exact(&mut bytes).map_err(|error| match error.kind() {
-            std::io::ErrorKind::UnexpectedEof => ModelError::Malformed {
-                reason: "the data ends before the model does",
-            },
-            _ => ModelError::Io(error),
-        })?;
+        fill(&mut self.reader, &mut bytes)?;
         Ok(bytes)
     }
 
@@ -327,17 +347,20 @@ impl<R: Read> Decoder<R> {
         Ok(u64::from_le_bytes(self.bytes()?))
     }
 
-    fn f64(&mut self) -> Result<f64, ModelError> {
-        Ok(f64::from_le_bytes(self.bytes()?))
-    }
-
-    /// Reads `count` floats. The count comes from the data, so memory is reserved as
-    /// values arrive rather than up front, and a corrupted count fails at the end of the
-    /// data instead of exhausting memory.
+    /// Reads `count` floats, in bulk but one bounded chunk at a time. The count comes
+    /// from the data, so memory is reserved as values arrive rather than up front, and a
+    /// corrupted count fails at the end of the data instead of exhausting memory.
     fn f64s(&mut self, count: usize) -> Result<Vec<f64>, ModelError> {
-        let mut values = Vec::with_capacity(count.min(4096));
-        for _ in 0..count {
-            values.push(self.f64()?);
+        let mut values = Vec::with_capacity(count.min(8 * DECODE_CHUNK));
+        let mut remaining = count;
+        while remaining > 0 {
+            let chunk = remaining.min(DECODE_CHUNK);
+            let bytes = &mut self.buffer[..8 * chunk];
+            fill(&mut self.reader, bytes)?;
+            // The slice holds 8 * chunk bytes, so there is no remainder.
+            let (chunks, _) = bytes.as_chunks::<8>();
+            values.extend(chunks.iter().map(|value| f64::from_le_bytes(*value)));
+            remaining -= chunk;
         }
         Ok(values)
     }
