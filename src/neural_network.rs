@@ -1,7 +1,7 @@
 use crate::activation_functions::{get_activation_function, ActivationFunction};
 use crate::layer::Layer;
 use crate::ModelError;
-use nalgebra::{DMatrix, DVector};
+use nalgebra::DVector;
 use rand::{rng, Rng};
 use std::fmt;
 use serde::{Deserialize, Serialize};
@@ -20,18 +20,17 @@ use serde::{Deserialize, Serialize};
 ///
 /// ```
 /// use only_brain::NeuralNetwork;
-/// use nalgebra::dmatrix;
-/// use nalgebra::dvector;
 ///
 /// // A 2 -> 2 -> 1 network.
 /// let mut nn = NeuralNetwork::<2, 1>::new(&[2]);
 ///
-/// nn.set_layer_weights(1, dmatrix![0.1, 0.2;
-///                                  0.3, 0.4]);
-/// nn.set_layer_biases(1, dvector![0.1, 0.2]);
+/// // One row per neuron, one weight per neuron of the previous layer.
+/// nn.set_layer_weights(1, &[[0.1, 0.2],
+///                           [0.3, 0.4]]);
+/// nn.set_layer_biases(1, &[0.1, 0.2]);
 ///
-/// nn.set_layer_weights(2, dmatrix![0.9, 0.8]);
-/// nn.set_layer_biases(2, dvector![0.1]);
+/// nn.set_layer_weights(2, &[[0.9, 0.8]]);
+/// nn.set_layer_biases(2, &[0.1]);
 ///
 /// let output = nn.feed_forward(&[0.5, 0.2]);
 ///
@@ -122,12 +121,10 @@ impl<const IN: usize, const OUT: usize> NeuralNetwork<IN, OUT> {
     ///
     /// ```
     /// # use only_brain::NeuralNetwork;
-    /// # use nalgebra::dmatrix;
-    /// # use nalgebra::dvector;
     /// let mut nn = NeuralNetwork::<1, 1>::new(&[]);
     ///
-    /// nn.set_layer_weights(1, dmatrix![0.5]);
-    /// nn.set_layer_biases(1, dvector![0.5]);
+    /// nn.set_layer_weights(1, &[[0.5]]);
+    /// nn.set_layer_biases(1, &[0.5]);
     ///
     /// let output = nn.feed_forward(&[0.5]);
     /// assert!((output[0] - 0.679178699175393).abs() < 1e-12);
@@ -146,42 +143,102 @@ impl<const IN: usize, const OUT: usize> NeuralNetwork<IN, OUT> {
             .expect("output layer width should match the OUT type parameter")
     }
 
-    /// Sets the layer weights for the given layer. The weights matrix must have the size
-    /// of the layer neurons x layer inputs. The layer index must be greater than 0 since it
-    /// corresponds to the layer number that receives these weights.
-    pub fn set_layer_weights(&mut self, layer: usize, weights: DMatrix<f64>) {
-        if layer == 0 {
-            panic!("Invalid layer index");
-        }
-        self.layers[layer - 1].set_weights(weights);
+    /// Sets every weight of the given layer, as one row per neuron of that layer
+    /// holding one weight per neuron of the previous layer.
+    ///
+    /// Layer 0 is the input layer, which has no weights, so `layer` starts at 1. Nested
+    /// arrays and `Vec<Vec<f64>>` are both accepted.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `layer` is 0 or past the output layer, or if `weights` does not have
+    /// exactly `layer_size(layer)` rows of `layer_size(layer - 1)` weights.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use only_brain::NeuralNetwork;
+    /// let mut nn = NeuralNetwork::<3, 1>::new(&[2]);
+    ///
+    /// nn.set_layer_weights(1, &[[0.1, 0.2, 0.3],
+    ///                           [0.4, 0.5, 0.6]]);
+    ///
+    /// // Weights computed at runtime work the same way.
+    /// let output_weights = vec![vec![0.7, 0.8]];
+    /// nn.set_layer_weights(2, &output_weights);
+    ///
+    /// assert_eq!(nn.layer_weights(2), output_weights);
+    /// ```
+    pub fn set_layer_weights<R: AsRef<[f64]>>(&mut self, layer: usize, weights: &[R]) {
+        self.layer_mut(layer).set_weights(weights);
     }
 
-    /// Sets the layer biases for the given layer. The biases vector must have the size
-    /// of the layer neurons. The layer index must be greater than 0 since the input layer
-    /// does not have biases.
-    pub fn set_layer_biases(&mut self, layer: usize, biases: DVector<f64>) {
-        if layer == 0 {
-            panic!("Invalid layer index");
-        }
-        self.layers[layer - 1].set_biases(biases);
+    /// Returns the weights of the given layer, as one row per neuron of that layer
+    /// holding one weight per neuron of the previous layer.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `layer` is 0 or past the output layer.
+    pub fn layer_weights(&self, layer: usize) -> Vec<Vec<f64>> {
+        self.layer(layer).weight_rows()
+    }
+
+    /// Sets the biases of the given layer, one per neuron.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `layer` is 0 or past the output layer, or if `biases` does not have
+    /// exactly `layer_size(layer)` elements.
+    pub fn set_layer_biases(&mut self, layer: usize, biases: &[f64]) {
+        self.layer_mut(layer).set_biases(biases);
+    }
+
+    /// Returns the biases of the given layer, one per neuron.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `layer` is 0 or past the output layer.
+    pub fn layer_biases(&self, layer: usize) -> &[f64] {
+        self.layer(layer).biases().as_slice()
     }
 
     /// Sets the weight of a specific neuron connection. The layer index must be greater
     /// than 0 since the input layer does not have weights.
     pub fn set_weight(&mut self, layer: usize, neuron: usize, input: usize, weight: f64) {
-        if layer == 0 {
-            panic!("Invalid layer index");
-        }
-        self.layers[layer - 1].set_weight(neuron, input, weight);
+        self.layer_mut(layer).set_weight(neuron, input, weight);
     }
 
     /// Gets the weight of a specific neuron connection. The layer index must be greater
     /// than 0 since the input layer does not have weights.
     pub fn get_weight(&self, layer: usize, neuron: usize, input: usize) -> f64 {
+        self.layer(layer).weights()[(neuron, input)]
+    }
+
+    /// Sets the bias of a specific neuron. The layer index must be greater than 0 since
+    /// the input layer does not have biases.
+    pub fn set_bias(&mut self, layer: usize, neuron: usize, bias: f64) {
+        self.layer_mut(layer).set_bias(neuron, bias);
+    }
+
+    /// Gets the bias of a specific neuron. The layer index must be greater than 0 since
+    /// the input layer does not have biases.
+    pub fn get_bias(&self, layer: usize, neuron: usize) -> f64 {
+        self.layer(layer).biases()[neuron]
+    }
+
+    /// The layer that receives weights for `layer`, which counts the input layer as 0.
+    fn layer(&self, layer: usize) -> &Layer {
         if layer == 0 {
             panic!("Invalid layer index");
         }
-        self.layers[layer - 1].weights()[(neuron, input)]
+        &self.layers[layer - 1]
+    }
+
+    fn layer_mut(&mut self, layer: usize) -> &mut Layer {
+        if layer == 0 {
+            panic!("Invalid layer index");
+        }
+        &mut self.layers[layer - 1]
     }
 
     /// Returns the number of layers of the neural network.
@@ -194,7 +251,7 @@ impl<const IN: usize, const OUT: usize> NeuralNetwork<IN, OUT> {
         if layer == 0 {
             return IN;
         }
-        self.layers[layer - 1].size()
+        self.layer(layer).size()
     }
 
     /// Returns the activation function used by every layer of the network.
@@ -286,7 +343,6 @@ impl<const IN: usize, const OUT: usize> fmt::Display for NeuralNetwork<IN, OUT> 
 mod tests {
     use super::*;
     use crate::activation_functions::{binary_step, relu, sigmoid, tanh};
-    use nalgebra::{dmatrix, dvector};
 
     const EPSILON: f64 = 1e-12;
 
@@ -300,8 +356,8 @@ mod tests {
     /// A 2 -> 1 network with known weights, so outputs can be checked by hand.
     fn fixed_network() -> NeuralNetwork<2, 1> {
         let mut nn = NeuralNetwork::<2, 1>::new(&[]);
-        nn.set_layer_weights(1, dmatrix![0.5, -0.25]);
-        nn.set_layer_biases(1, dvector![0.1]);
+        nn.set_layer_weights(1, &[[0.5, -0.25]]);
+        nn.set_layer_biases(1, &[0.1]);
         nn
     }
 
@@ -415,21 +471,21 @@ mod tests {
     #[should_panic(expected = "Invalid layer index")]
     fn set_layer_weights_rejects_layer_zero() {
         let mut nn = NeuralNetwork::<2, 1>::new(&[]);
-        nn.set_layer_weights(0, dmatrix![0.5, 0.5]);
+        nn.set_layer_weights(0, &[[0.5, 0.5]]);
     }
 
     #[test]
     #[should_panic(expected = "Incompatible weights matrix size")]
     fn set_layer_weights_rejects_a_mismatched_matrix() {
         let mut nn = NeuralNetwork::<2, 1>::new(&[]);
-        nn.set_layer_weights(1, dmatrix![0.5, 0.5, 0.5]);
+        nn.set_layer_weights(1, &[[0.5, 0.5, 0.5]]);
     }
 
     #[test]
     #[should_panic(expected = "Incompatible biases vector size")]
     fn set_layer_biases_rejects_a_mismatched_vector() {
         let mut nn = NeuralNetwork::<2, 1>::new(&[]);
-        nn.set_layer_biases(1, dvector![0.1, 0.2]);
+        nn.set_layer_biases(1, &[0.1, 0.2]);
     }
 
     /// `Display` used to print the address of a function pointer here.
@@ -455,5 +511,61 @@ mod tests {
         let nn = NeuralNetwork::<4, 1>::new(&[2]);
 
         assert!(nn.to_string().contains("Input Layer Size: 4"));
+    }
+
+    #[test]
+    fn layer_weights_and_biases_round_trip_in_row_major_order() {
+        let mut nn = NeuralNetwork::<2, 3>::new(&[]);
+        let weights = [[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]];
+
+        nn.set_layer_weights(1, &weights);
+        nn.set_layer_biases(1, &[0.7, 0.8, 0.9]);
+
+        assert_eq!(nn.layer_weights(1), weights.map(Vec::from).to_vec());
+        assert_eq!(nn.layer_biases(1), &[0.7, 0.8, 0.9]);
+        // Row = neuron, column = input, matching set_weight and get_weight.
+        assert_eq!(nn.get_weight(1, 2, 0), 0.5);
+    }
+
+    #[test]
+    fn set_layer_weights_accepts_weights_built_at_runtime() {
+        let mut nn = NeuralNetwork::<2, 1>::new(&[]);
+        let weights: Vec<Vec<f64>> = vec![vec![0.5, -0.25]];
+
+        nn.set_layer_weights(1, &weights);
+
+        assert_eq!(nn.layer_weights(1), weights);
+    }
+
+    #[test]
+    #[should_panic(expected = "Incompatible weights matrix size")]
+    fn set_layer_weights_rejects_ragged_rows() {
+        let mut nn = NeuralNetwork::<2, 2>::new(&[]);
+        let ragged: Vec<Vec<f64>> = vec![vec![0.1, 0.2], vec![0.3]];
+
+        nn.set_layer_weights(1, &ragged);
+    }
+
+    #[test]
+    #[should_panic(expected = "Incompatible weights matrix size")]
+    fn set_layer_weights_rejects_the_wrong_number_of_rows() {
+        let mut nn = NeuralNetwork::<2, 2>::new(&[]);
+        nn.set_layer_weights(1, &[[0.1, 0.2]]);
+    }
+
+    #[test]
+    fn set_and_get_bias_round_trip() {
+        let mut nn = NeuralNetwork::<2, 2>::new(&[]);
+        nn.set_bias(1, 1, -0.3);
+
+        assert_eq!(nn.get_bias(1, 1), -0.3);
+        assert_eq!(nn.layer_biases(1), &[0.0, -0.3]);
+    }
+
+    #[test]
+    #[should_panic(expected = "Invalid layer index")]
+    fn layer_biases_rejects_layer_zero() {
+        let nn = NeuralNetwork::<2, 1>::new(&[]);
+        nn.layer_biases(0);
     }
 }
