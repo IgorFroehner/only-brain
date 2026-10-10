@@ -36,18 +36,29 @@ impl Layer {
         self.size
     }
 
-    pub fn set_weights(&mut self, weights: DMatrix<f64>) {
-        if weights.ncols() != self.weights.ncols() || weights.nrows() != self.weights.nrows() {
-            panic!("Incompatible weights matrix size");
+    /// Replaces every weight, given one row per neuron with one entry per input.
+    pub fn set_weights<R: AsRef<[f64]>>(&mut self, rows: &[R]) {
+        let (neurons, inputs) = self.weights.shape();
+        if rows.len() != neurons || rows.iter().any(|row| row.as_ref().len() != inputs) {
+            panic!("Incompatible weights matrix size: expected {neurons} rows of {inputs} weights");
         }
-        self.weights = weights;
+        self.weights = DMatrix::from_fn(neurons, inputs, |neuron, input| rows[neuron].as_ref()[input]);
     }
 
-    pub fn set_biases(&mut self, biases: DVector<f64>) {
-        if biases.nrows() != self.bias.nrows() {
-            panic!("Incompatible biases vector size");
+    pub fn set_biases(&mut self, biases: &[f64]) {
+        if biases.len() != self.bias.nrows() {
+            panic!("Incompatible biases vector size: expected {} biases", self.bias.nrows());
         }
-        self.bias = biases;
+        self.bias.copy_from_slice(biases);
+    }
+
+    pub fn set_bias(&mut self, neuron: usize, bias: f64) {
+        self.bias[neuron] = bias;
+    }
+
+    /// The weights as one row per neuron, each holding one weight per input.
+    pub fn weight_rows(&self) -> Vec<Vec<f64>> {
+        self.weights.row_iter().map(|row| row.iter().copied().collect()).collect()
     }
 
     /// Describes the first way this layer disagrees with itself or with the number of

@@ -4,7 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use nalgebra::{dmatrix, dvector, DMatrix, DVector};
+use nalgebra::{DMatrix, DVector};
 use only_brain::{dump_model, load_model, ActivationFunction, ModelError, NeuralNetwork};
 
 const EPSILON: f64 = 1e-12;
@@ -41,20 +41,11 @@ impl Drop for TempModelPath {
 fn sample_network() -> NeuralNetwork<2, 2> {
     let mut nn = NeuralNetwork::<2, 2>::new(&[3]);
 
-    nn.set_layer_weights(
-        1,
-        dmatrix![0.1, 0.2;
-                 0.3, 0.4;
-                 0.5, 0.6],
-    );
-    nn.set_layer_biases(1, dvector![0.1, 0.2, 0.3]);
+    nn.set_layer_weights(1, &[[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]]);
+    nn.set_layer_biases(1, &[0.1, 0.2, 0.3]);
 
-    nn.set_layer_weights(
-        2,
-        dmatrix![0.9, 0.8, 0.7;
-                 0.6, 0.5, 0.4],
-    );
-    nn.set_layer_biases(2, dvector![0.1, 0.2]);
+    nn.set_layer_weights(2, &[[0.9, 0.8, 0.7], [0.6, 0.5, 0.4]]);
+    nn.set_layer_biases(2, &[0.1, 0.2]);
 
     nn
 }
