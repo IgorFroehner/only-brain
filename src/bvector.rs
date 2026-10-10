@@ -35,6 +35,11 @@ impl<T: SimdRealField + Copy, const N: usize> BVector<T, N> {
         N
     }
 
+    /// Whether the vector has no elements, which is only the case when `N` is 0.
+    pub fn is_empty(&self) -> bool {
+        N == 0
+    }
+
     pub fn get(&self, index: usize) -> T {
         assert!(index < N, "Index out of bounds");
         self.data_vector[index]
