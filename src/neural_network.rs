@@ -1,5 +1,6 @@
 use crate::activation_functions::{get_activation_function, ActivationFunction};
 use crate::layer::Layer;
+use crate::ModelError;
 use nalgebra::{DMatrix, DVector};
 use rand::{rng, Rng};
 use std::fmt;
@@ -37,7 +38,18 @@ use serde::{Deserialize, Serialize};
 /// println!("{:?}", output);
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "NetworkData")]
 pub struct NeuralNetwork<const IN: usize, const OUT: usize> {
+    layers: Vec<Layer>,
+    activation_function: Option<ActivationFunction>,
+}
+
+/// The serialized form of a network, before its shape has been checked.
+///
+/// Deserializing goes through this so that every serde entry point, not only
+/// [`crate::load_model`], rejects layers that do not fit together.
+#[derive(Deserialize)]
+pub(crate) struct NetworkData {
     layers: Vec<Layer>,
     activation_function: Option<ActivationFunction>,
 }
@@ -185,15 +197,6 @@ impl<const IN: usize, const OUT: usize> NeuralNetwork<IN, OUT> {
         self.layers[layer - 1].size()
     }
 
-    /// The input width recorded in the first weight matrix, or `None` for a network
-    /// with no layers.
-    ///
-    /// Unlike `layer_size(0)` this reads the deserialized data rather than the `IN` type
-    /// parameter, which is what makes it useful for validating a freshly loaded model.
-    pub(crate) fn stored_input_size(&self) -> Option<usize> {
-        Some(self.layers.first()?.weights().ncols())
-    }
-
     /// Returns the activation function used by every layer of the network.
     ///
     /// Networks that have not had one set explicitly use
@@ -221,6 +224,47 @@ impl<const IN: usize, const OUT: usize> NeuralNetwork<IN, OUT> {
         for layer in &self.layers {
             println!("{} {}", layer.weights(), layer.biases());
         }
+    }
+}
+
+impl<const IN: usize, const OUT: usize> TryFrom<NetworkData> for NeuralNetwork<IN, OUT> {
+    type Error = ModelError;
+
+    /// Checks that the stored layers chain from `IN` inputs to `OUT` outputs and that
+    /// each layer agrees with itself.
+    fn try_from(data: NetworkData) -> Result<Self, Self::Error> {
+        let first = data.layers.first().ok_or(ModelError::EmptyNetwork)?;
+        if first.weights().ncols() != IN {
+            return Err(ModelError::DimensionMismatch {
+                end: "input",
+                expected: IN,
+                found: first.weights().ncols(),
+            });
+        }
+
+        let mut inputs = IN;
+        for (index, layer) in data.layers.iter().enumerate() {
+            if let Some(reason) = layer.inconsistency(inputs) {
+                return Err(ModelError::InconsistentLayer {
+                    layer: index + 1,
+                    reason,
+                });
+            }
+            inputs = layer.size();
+        }
+
+        if inputs != OUT {
+            return Err(ModelError::DimensionMismatch {
+                end: "output",
+                expected: OUT,
+                found: inputs,
+            });
+        }
+
+        Ok(Self {
+            layers: data.layers,
+            activation_function: data.activation_function,
+        })
     }
 }
 

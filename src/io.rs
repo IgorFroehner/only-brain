@@ -1,10 +1,13 @@
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Write};
+use std::path::Path;
 
+use crate::neural_network::NetworkData;
 use crate::NeuralNetwork;
 
 /// Something that went wrong while saving or loading a model.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum ModelError {
     /// The file could not be read or written.
     #[error("could not access the model file")]
@@ -28,6 +31,16 @@ pub enum ModelError {
     /// The file decoded to a network with no layers at all.
     #[error("model file contains a network with no layers")]
     EmptyNetwork,
+
+    /// A stored layer does not fit with itself or with the layer before it, which means
+    /// the file was corrupted or edited by hand.
+    #[error("layer {layer} of the model is inconsistent: {reason}")]
+    InconsistentLayer {
+        /// The layer number, counting the input layer as 0.
+        layer: usize,
+        /// What disagreed.
+        reason: &'static str,
+    },
 }
 
 /// Writes a model to `path`.
@@ -38,7 +51,7 @@ pub enum ModelError {
 /// [`ModelError::Serialization`] if encoding fails.
 pub fn dump_model<const IN: usize, const OUT: usize>(
     model: &NeuralNetwork<IN, OUT>,
-    path: &str,
+    path: impl AsRef<Path>,
 ) -> Result<(), ModelError> {
     let encoded = bincode::serialize(model)?;
 
@@ -53,14 +66,16 @@ pub fn dump_model<const IN: usize, const OUT: usize>(
 ///
 /// The input and output widths are recovered from the stored weight matrices, so
 /// [`dump_model`] writes no extra data and files produced by earlier versions still
-/// load -- provided their dimensions match the type you ask for.
+/// load -- provided their dimensions match the type you ask for. Every layer is also
+/// checked against its neighbours, so a corrupted file is reported here rather than
+/// panicking later in [`NeuralNetwork::feed_forward`].
 ///
 /// # Errors
 ///
 /// Returns [`ModelError::Io`] if the file cannot be read, [`ModelError::Serialization`]
-/// if it is not a valid model, and [`ModelError::DimensionMismatch`] or
-/// [`ModelError::EmptyNetwork`] if the stored network does not fit
-/// `NeuralNetwork<IN, OUT>`.
+/// if it is not a valid model, [`ModelError::DimensionMismatch`] if the stored network
+/// does not fit `NeuralNetwork<IN, OUT>`, and [`ModelError::EmptyNetwork`] or
+/// [`ModelError::InconsistentLayer`] if its layers do not form a network at all.
 ///
 /// # Example
 ///
@@ -72,32 +87,12 @@ pub fn dump_model<const IN: usize, const OUT: usize>(
 /// # }
 /// ```
 pub fn load_model<const IN: usize, const OUT: usize>(
-    path: &str,
+    path: impl AsRef<Path>,
 ) -> Result<NeuralNetwork<IN, OUT>, ModelError> {
     let file = BufReader::new(File::open(path)?);
-    let model: NeuralNetwork<IN, OUT> = bincode::deserialize_from(file)?;
+    // Decoding the unchecked form keeps the typed error; deserializing the network
+    // directly would fold it into a bincode message.
+    let data: NetworkData = bincode::deserialize_from(file)?;
 
-    let stored_inputs = match model.stored_input_size() {
-        Some(size) => size,
-        None => return Err(ModelError::EmptyNetwork),
-    };
-
-    if stored_inputs != IN {
-        return Err(ModelError::DimensionMismatch {
-            end: "input",
-            expected: IN,
-            found: stored_inputs,
-        });
-    }
-
-    let stored_outputs = model.layer_size(model.num_layers() - 1);
-    if stored_outputs != OUT {
-        return Err(ModelError::DimensionMismatch {
-            end: "output",
-            expected: OUT,
-            found: stored_outputs,
-        });
-    }
-
-    Ok(model)
+    NeuralNetwork::try_from(data)
 }
