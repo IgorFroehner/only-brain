@@ -1,6 +1,7 @@
 use crate::activation_functions::ActivationFunction;
 use crate::layer::Layer;
 use crate::ModelError;
+use nalgebra::DMatrix;
 use rand::{rng, Rng};
 use std::fmt;
 use serde::{Deserialize, Serialize};
@@ -218,11 +219,30 @@ impl<const IN: usize, const OUT: usize> NeuralNetwork<IN, OUT> {
     /// assert!((output[0] - 0.679178699175393).abs() < 1e-12);
     /// ```
     pub fn feed_forward(&self, inputs: &[f64; IN]) -> [f64; OUT] {
-        // One scratch allocation split into two halves that the layers ping-pong
-        // between, each wide enough for the widest layer.
-        let widest = self.layers.iter().map(Layer::size).fold(IN, usize::max);
-        let mut scratch = vec![0.0; widest * 2];
-        let (mut current, mut next) = scratch.split_at_mut(widest);
+        // Two halves that the layers ping-pong between, each wide enough for the
+        // widest layer. Networks up to STACK_WIDTH neurons per layer, which is every
+        // network a genome is likely to drive, run without touching the heap.
+        const STACK_WIDTH: usize = 16;
+
+        let widest = self.widest_layer();
+        if widest <= STACK_WIDTH {
+            let mut scratch = [0.0; STACK_WIDTH * 2];
+            self.forward_in(inputs, &mut scratch[..widest * 2])
+        } else {
+            let mut scratch = vec![0.0; widest * 2];
+            self.forward_in(inputs, &mut scratch)
+        }
+    }
+
+    /// The width of the widest layer, counting the input layer.
+    fn widest_layer(&self) -> usize {
+        self.layers.iter().map(Layer::size).fold(IN, usize::max)
+    }
+
+    /// Runs the layers over `scratch`, which must hold `2 * widest_layer()` values.
+    #[inline(always)]
+    fn forward_in(&self, inputs: &[f64; IN], scratch: &mut [f64]) -> [f64; OUT] {
+        let (mut current, mut next) = scratch.split_at_mut(scratch.len() / 2);
 
         current[..IN].copy_from_slice(inputs);
         let mut width = IN;
@@ -237,6 +257,53 @@ impl<const IN: usize, const OUT: usize> NeuralNetwork<IN, OUT> {
         // so the final slice always has exactly OUT elements.
         <[f64; OUT]>::try_from(&current[..width])
             .expect("output layer width should match the OUT type parameter")
+    }
+
+    /// Feeds every input to the network and returns one output per input, in order.
+    ///
+    /// This computes the same values as calling [`feed_forward`](Self::feed_forward)
+    /// once per input, but runs each layer as a single matrix product over all the
+    /// inputs at once, which is faster when there are many of them: scoring a dataset,
+    /// for example. It does not help when every input goes to a different network.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use only_brain::NeuralNetwork;
+    /// let nn = NeuralNetwork::<2, 1>::new(&[3]);
+    ///
+    /// let inputs = [[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]];
+    /// let outputs = nn.feed_forward_batch(&inputs);
+    ///
+    /// assert_eq!(outputs.len(), 4);
+    /// assert_eq!(outputs[2], nn.feed_forward(&inputs[2]));
+    /// ```
+    pub fn feed_forward_batch(&self, inputs: &[[f64; IN]]) -> Vec<[f64; OUT]> {
+        let samples = inputs.len();
+        let widest = self.widest_layer();
+
+        // One column per sample, with as many rows as the widest layer; each layer
+        // works on the top rows it needs and the two matrices ping-pong.
+        let mut current = DMatrix::zeros(widest, samples);
+        let mut next = DMatrix::zeros(widest, samples);
+
+        for (mut column, sample) in current.column_iter_mut().zip(inputs) {
+            column.rows_mut(0, IN).copy_from_slice(sample);
+        }
+        let mut width = IN;
+
+        for layer in &self.layers {
+            layer.forward_batch_into(current.rows(0, width), next.rows_mut(0, layer.size()));
+            width = layer.size();
+            std::mem::swap(&mut current, &mut next);
+        }
+
+        current
+            .rows(0, width)
+            .column_iter()
+            // As in `feed_forward`, the last layer is always OUT wide.
+            .map(|column| std::array::from_fn(|neuron| column[neuron]))
+            .collect()
     }
 
     /// Returns the number of weights and biases in the network, which is the length of
@@ -567,6 +634,8 @@ impl<const IN: usize, const OUT: usize> fmt::Display for NeuralNetwork<IN, OUT> 
 mod tests {
     use super::*;
     use crate::activation_functions::{binary_step, identity, relu, sigmoid, tanh};
+    use rand::rngs::StdRng;
+    use rand::SeedableRng;
 
     const EPSILON: f64 = 1e-12;
 
@@ -643,6 +712,42 @@ mod tests {
         let output = nn.feed_forward(&[1.0, 2.0]);
 
         assert_all_close(&output, &[sigmoid(0.1)]);
+    }
+
+    #[test]
+    fn feed_forward_batch_matches_feed_forward_for_every_input() {
+        let mut rng = StdRng::seed_from_u64(7);
+        let mut nn = NeuralNetwork::<3, 2>::new_with_rng(&[5, 4], &mut rng);
+        nn.set_layer_activation(1, ActivationFunction::ReLU);
+        nn.set_layer_activation(2, ActivationFunction::Tanh);
+
+        let inputs: Vec<[f64; 3]> = (0..7).map(|i| [i as f64 * 0.3 - 1.0, 0.5, -(i as f64)]).collect();
+
+        let batch = nn.feed_forward_batch(&inputs);
+
+        assert_eq!(batch.len(), inputs.len());
+        for (input, output) in inputs.iter().zip(&batch) {
+            assert_all_close(output, &nn.feed_forward(input));
+        }
+    }
+
+    #[test]
+    fn feed_forward_batch_of_nothing_is_empty() {
+        let nn = NeuralNetwork::<2, 1>::new(&[2]);
+
+        assert!(nn.feed_forward_batch(&[]).is_empty());
+    }
+
+    #[test]
+    fn feed_forward_batch_works_without_hidden_layers() {
+        let mut nn = NeuralNetwork::<2, 1>::new(&[]);
+        nn.set_layer_weights(1, &[[0.5, -0.25]]);
+        nn.set_layer_biases(1, &[0.1]);
+        nn.set_output_activation(ActivationFunction::Identity);
+
+        let outputs = nn.feed_forward_batch(&[[1.0, 1.0], [2.0, 0.0]]);
+
+        assert_all_close(&outputs.concat(), &[0.35, 1.1]);
     }
 
     #[test]
