@@ -3,6 +3,8 @@
 //! `feed_forward` and the flat parameter view run once per fitness evaluation in a
 //! genetic algorithm, so they are measured across the small shapes such networks
 //! actually have, plus one larger shape to show how the costs scale.
+//! `feed_forward_batch` is measured against a loop of `feed_forward` calls over the
+//! same inputs, which is what it replaces.
 //!
 //! Run with `cargo bench`, or `cargo bench -- feed_forward` for one group.
 
@@ -39,6 +41,42 @@ fn bench_feed_forward(c: &mut Criterion) {
     group.bench_function(BenchmarkId::from_parameter("64-128-64-10"), |b| {
         let inputs = [0.1; 64];
         b.iter(|| medium.feed_forward(black_box(&inputs)))
+    });
+
+    group.finish();
+}
+
+/// One network scoring a whole dataset: a loop of single passes against one batch.
+fn bench_feed_forward_batch(c: &mut Criterion) {
+    let mut group = c.benchmark_group("feed_forward_batch");
+    const SAMPLES: usize = 256;
+
+    let small = network::<16, 4>(&[16, 16]);
+    let small_inputs: Vec<[f64; 16]> = (0..SAMPLES).map(|i| [i as f64 / SAMPLES as f64; 16]).collect();
+    group.bench_function(BenchmarkId::new("loop", format!("16-16-16-4/{SAMPLES}")), |b| {
+        b.iter(|| {
+            black_box(&small_inputs)
+                .iter()
+                .map(|inputs| small.feed_forward(inputs))
+                .collect::<Vec<_>>()
+        })
+    });
+    group.bench_function(BenchmarkId::new("batch", format!("16-16-16-4/{SAMPLES}")), |b| {
+        b.iter(|| small.feed_forward_batch(black_box(&small_inputs)))
+    });
+
+    let medium = network::<64, 10>(&[128, 64]);
+    let medium_inputs: Vec<[f64; 64]> = (0..SAMPLES).map(|i| [i as f64 / SAMPLES as f64; 64]).collect();
+    group.bench_function(BenchmarkId::new("loop", format!("64-128-64-10/{SAMPLES}")), |b| {
+        b.iter(|| {
+            black_box(&medium_inputs)
+                .iter()
+                .map(|inputs| medium.feed_forward(inputs))
+                .collect::<Vec<_>>()
+        })
+    });
+    group.bench_function(BenchmarkId::new("batch", format!("64-128-64-10/{SAMPLES}")), |b| {
+        b.iter(|| medium.feed_forward_batch(black_box(&medium_inputs)))
     });
 
     group.finish();
@@ -89,5 +127,11 @@ fn bench_model_io(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_feed_forward, bench_parameters, bench_model_io);
+criterion_group!(
+    benches,
+    bench_feed_forward,
+    bench_feed_forward_batch,
+    bench_parameters,
+    bench_model_io
+);
 criterion_main!(benches);

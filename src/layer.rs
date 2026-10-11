@@ -1,5 +1,5 @@
 use std::fmt;
-use nalgebra::{DMatrix, DVector, DVectorView, DVectorViewMut};
+use nalgebra::{DMatrix, DMatrixView, DMatrixViewMut, DVector, DVectorView, DVectorViewMut};
 use rand::distr::Uniform;
 use rand::Rng;
 
@@ -70,6 +70,21 @@ impl Layer {
 
         outputs.gemv(1.0, &self.weights, &inputs, 0.0);
         outputs += &self.biases;
+
+        let activation = get_activation_function(self.activation);
+        outputs.apply(|x| *x = activation(*x));
+    }
+
+    /// Computes this layer's outputs for every column of `inputs` into the matching
+    /// column of `outputs`, without allocating.
+    ///
+    /// `inputs` must have [`inputs()`](Self::inputs) rows and `outputs`
+    /// [`size()`](Self::size) rows, with one column per sample in both.
+    pub fn forward_batch_into(&self, inputs: DMatrixView<'_, f64>, mut outputs: DMatrixViewMut<'_, f64>) {
+        outputs.gemm(1.0, &self.weights, &inputs, 0.0);
+        for mut column in outputs.column_iter_mut() {
+            column += &self.biases;
+        }
 
         let activation = get_activation_function(self.activation);
         outputs.apply(|x| *x = activation(*x));

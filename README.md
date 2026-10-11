@@ -53,6 +53,22 @@ fn main() {
 `new` draws the weights uniformly from `[-1, 1)` with zero biases. Use
 `new_with_rng` for a seeded, reproducible start.
 
+To run many inputs through the same network, such as a whole dataset,
+`feed_forward_batch` takes a slice of inputs and returns one output per input. It
+computes the same values as `feed_forward` but runs each layer as one matrix product
+over every input, which is faster from a few dozen inputs up.
+
+```rust
+use only_brain::NeuralNetwork;
+
+let nn = NeuralNetwork::<2, 1>::new(&[2]);
+
+let inputs = [[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]];
+let outputs = nn.feed_forward_batch(&inputs);
+
+assert_eq!(outputs.len(), 4);
+```
+
 ## Training it your way
 
 ### Layer by layer
@@ -200,7 +216,7 @@ cargo test --all-targets                      # unit and integration tests, buil
 cargo test --doc                              # doctests, including every snippet in this README
 cargo clippy --all-targets -- -D warnings
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
-cargo bench                                   # feed_forward, flat parameters, model IO
+cargo bench                                   # feed_forward, batches, flat parameters, model IO
 ```
 
 CI runs the same checks on every push and pull request. The README is compiled as

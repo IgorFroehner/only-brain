@@ -70,7 +70,10 @@ dump_model, load_model, write_model, read_model, ModelError, MODEL_FORMAT_VERSIO
   column-major in memory) and a `DVector` of biases. nalgebra never crosses the
   public boundary: every public method takes and returns arrays, slices or `Vec`s.
   `forward_into` is the allocation-free hot path that `feed_forward` calls once per
-  layer with a single scratch buffer per call. `extend_parameters` /
+  layer with a single scratch buffer per call (on the stack when the widest layer
+  has at most 16 neurons, which a benchmark showed beats a larger stack buffer).
+  `forward_batch_into` is its `gemm` counterpart behind `feed_forward_batch`, one
+  column per sample. `extend_parameters` /
   `take_parameters` define the flat order.
 - **`NetworkData` / `LayerData` are the single validation funnel.** They are the
   serde form of a network (`{"layers": [{"activation", "weights", "biases"}]}`).
