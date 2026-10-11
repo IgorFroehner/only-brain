@@ -307,6 +307,62 @@ fn loading_rejects_a_size_field_that_disagrees_with_the_weights() {
     assert_inconsistent_layer(load_model(temp.path()), 2);
 }
 
+fn raw_bytes(layers: Vec<RawLayer>) -> Vec<u8> {
+    let raw = RawNetwork {
+        layers,
+        activation_function: None,
+    };
+    bincode::serialize(&raw).unwrap()
+}
+
+/// Overwrites the `u64` at `offset`, checking first that it holds `old` so a wrong
+/// offset fails here rather than corrupting some other field.
+fn replace_u64(bytes: &mut [u8], offset: usize, old: u64, new: u64) {
+    let field = &mut bytes[offset..offset + 8];
+    assert_eq!(u64::from_le_bytes(field.try_into().unwrap()), old, "unexpected value at {offset}");
+    field.copy_from_slice(&new.to_le_bytes());
+}
+
+// Offsets into a legacy 2 -> 3 -> 2 file: layer count (8), then the first layer's
+// size (8), weights length (8), 6 weights (48), rows (8), columns (8), biases
+// length (8), 3 biases (24) and biases rows (8).
+const LEGACY_FIRST_WEIGHT_ROWS: usize = 72;
+const LEGACY_FIRST_BIAS_ROWS: usize = 120;
+
+#[test]
+fn a_legacy_matrix_whose_shape_disagrees_with_its_values_is_unrecognized() {
+    let mut bytes = raw_bytes(vec![raw_layer(3, 2), raw_layer(2, 3)]);
+    replace_u64(&mut bytes, LEGACY_FIRST_WEIGHT_ROWS, 3, 4);
+
+    assert!(matches!(
+        read_model::<2, 2>(bytes.as_slice()),
+        Err(ModelError::UnrecognizedFormat)
+    ));
+}
+
+#[test]
+fn a_legacy_bias_vector_whose_length_disagrees_with_its_values_is_unrecognized() {
+    let mut bytes = raw_bytes(vec![raw_layer(3, 2), raw_layer(2, 3)]);
+    replace_u64(&mut bytes, LEGACY_FIRST_BIAS_ROWS, 3, 4);
+
+    assert!(matches!(
+        read_model::<2, 2>(bytes.as_slice()),
+        Err(ModelError::UnrecognizedFormat)
+    ));
+}
+
+#[test]
+fn a_legacy_activation_tag_other_than_none_or_some_is_unrecognized() {
+    let mut bytes = raw_bytes(vec![raw_layer(3, 2), raw_layer(2, 3)]);
+    // The file ends with the activation's Option tag, 0 for None.
+    *bytes.last_mut().unwrap() = 2;
+
+    assert!(matches!(
+        read_model::<2, 2>(bytes.as_slice()),
+        Err(ModelError::UnrecognizedFormat)
+    ));
+}
+
 #[test]
 fn serde_round_trips_through_a_plain_readable_form() {
     let mut original = NeuralNetwork::<2, 1>::new(&[]);
@@ -339,6 +395,26 @@ fn deserializing_directly_also_validates() {
     let error = serde_json::from_str::<NeuralNetwork<2, 2>>(broken_chain).unwrap_err();
     assert!(error.to_string().contains("layer 2"), "unexpected error: {error}");
     assert!(serde_json::from_str::<NeuralNetwork<2, 2>>(wrong_output).is_err());
+}
+
+#[test]
+fn deserializing_rejects_a_layer_without_neurons() {
+    let empty_first = r#"{"layers":[
+        {"activation":"Tanh","weights":[],"biases":[]}
+    ]}"#;
+    let empty_hidden = r#"{"layers":[
+        {"activation":"Tanh","weights":[[1,2],[3,4]],"biases":[0,0]},
+        {"activation":"Tanh","weights":[],"biases":[]},
+        {"activation":"Tanh","weights":[[1,2],[3,4]],"biases":[0,0]}
+    ]}"#;
+
+    for (json, layer) in [(empty_first, 1), (empty_hidden, 2)] {
+        let error = serde_json::from_str::<NeuralNetwork<2, 2>>(json).unwrap_err();
+        assert!(
+            error.to_string().contains(&format!("layer {layer} of the model is inconsistent: it has no neurons")),
+            "unexpected error: {error}"
+        );
+    }
 }
 
 #[test]
@@ -432,6 +508,49 @@ fn a_corrupted_neuron_count_fails_instead_of_exhausting_memory() {
     bytes[18..22].copy_from_slice(&u32::MAX.to_le_bytes());
 
     assert!(read_model::<2, 2>(bytes.as_slice()).is_err());
+}
+
+#[test]
+fn a_layer_with_no_neurons_is_reported_as_malformed() {
+    let zero_neurons = {
+        let mut bytes = to_bytes(&sample_network());
+        // magic (8) + version (2) + inputs (4) + layers (4)
+        bytes[18..22].copy_from_slice(&0u32.to_le_bytes());
+        bytes
+    };
+    let zero_inputs = {
+        let mut bytes = to_bytes(&sample_network());
+        bytes[10..14].copy_from_slice(&0u32.to_le_bytes());
+        bytes
+    };
+
+    for bytes in [zero_neurons, zero_inputs] {
+        match read_model::<2, 2>(bytes.as_slice()) {
+            Err(ModelError::Malformed { reason }) => assert_eq!(reason, "a layer has no neurons"),
+            other => panic!("expected a malformed model, got {other:?}"),
+        }
+    }
+}
+
+/// A reader that fails the way a disk or a network can, rather than by ending early.
+struct FailingReader;
+
+impl std::io::Read for FailingReader {
+    fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+        Err(std::io::Error::other("the device went away"))
+    }
+}
+
+#[test]
+fn a_read_error_is_reported_as_io_rather_than_as_a_corrupted_model() {
+    let bytes = to_bytes(&sample_network());
+    // The magic and version arrive, then the reader fails.
+    let reader = std::io::Read::chain(&bytes[..10], FailingReader);
+
+    match read_model::<2, 2>(reader) {
+        Err(ModelError::Io(error)) => assert_eq!(error.kind(), std::io::ErrorKind::Other),
+        other => panic!("expected an I/O error, got {other:?}"),
+    }
 }
 
 #[test]

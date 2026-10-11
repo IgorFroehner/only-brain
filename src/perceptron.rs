@@ -73,3 +73,57 @@ impl<const N: usize> fmt::Display for Perceptron<N> {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bvector;
+
+    const EPSILON: f64 = 1e-12;
+
+    #[test]
+    fn a_new_perceptron_has_zero_weights_and_bias() {
+        let perceptron = Perceptron::<3>::new(ActivationFunction::Identity);
+
+        assert_eq!(perceptron.feed_forward(&bvector![7.0, -2.0, 3.0]), 0.0);
+    }
+
+    #[test]
+    fn feed_forward_applies_weights_bias_and_activation() {
+        let mut perceptron = Perceptron::<2>::new(ActivationFunction::Identity);
+        perceptron.set_weights(bvector![0.5, -0.25]);
+        perceptron.set_bias(0.1);
+
+        // 0.5 * 2 - 0.25 * 4 + 0.1
+        assert!((perceptron.feed_forward(&bvector![2.0, 4.0]) - 0.1).abs() < EPSILON);
+
+        let mut perceptron = Perceptron::<2>::new(ActivationFunction::Sigmoid);
+        perceptron.set_weights(bvector![0.5, -0.25]);
+        perceptron.set_bias(0.1);
+        let expected = 1.0 / (1.0 + (-0.1f64).exp());
+        assert!((perceptron.feed_forward(&bvector![2.0, 4.0]) - expected).abs() < EPSILON);
+    }
+
+    #[test]
+    fn a_binary_step_perceptron_computes_or() {
+        let mut or_gate = Perceptron::<2>::new(ActivationFunction::BinaryStep);
+        or_gate.set_weights(bvector![1.0, 1.0]);
+        or_gate.set_bias(-0.5);
+
+        for (inputs, expected) in [([0.0, 0.0], 0.0), ([0.0, 1.0], 1.0), ([1.0, 0.0], 1.0), ([1.0, 1.0], 1.0)] {
+            assert_eq!(or_gate.feed_forward(&BVector::from_array(inputs)), expected, "OR{inputs:?}");
+        }
+    }
+
+    #[test]
+    fn display_shows_activation_size_and_bias() {
+        let mut perceptron = Perceptron::<4>::new(ActivationFunction::Tanh);
+        perceptron.set_bias(0.75);
+
+        let text = perceptron.to_string();
+
+        assert!(text.contains("Activation Function: Tanh"), "{text}");
+        assert!(text.contains("Inputs Size: 4"), "{text}");
+        assert!(text.contains("Bias: 0.75"), "{text}");
+    }
+}

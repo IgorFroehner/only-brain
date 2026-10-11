@@ -72,3 +72,51 @@ macro_rules! bvector {
     };
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn from_element_fills_every_position() {
+        let v = BVector::<f64, 3>::from_element(1.5);
+
+        assert_eq!((v.get(0), v.get(1), v.get(2)), (1.5, 1.5, 1.5));
+    }
+
+    #[test]
+    fn the_macro_keeps_elements_in_order() {
+        let v = bvector![1.0, 2.0, 3.0];
+
+        assert_eq!(v, BVector::from_array([1.0, 2.0, 3.0]));
+        assert_eq!((v.get(0), v.get(1), v.get(2)), (1.0, 2.0, 3.0));
+    }
+
+    #[test]
+    fn the_macro_accepts_a_trailing_comma() {
+        assert_eq!(bvector![1.0, 2.0,], bvector![1.0, 2.0]);
+    }
+
+    #[test]
+    fn len_is_the_compile_time_dimension() {
+        assert_eq!(bvector![1.0, 2.0, 3.0].len(), 3);
+        assert!(!bvector![1.0].is_empty());
+        assert!(BVector::<f64, 0>::from_array([]).is_empty());
+    }
+
+    #[test]
+    fn dot_sums_the_element_wise_products() {
+        assert_eq!(bvector![1.0, 2.0, 3.0].dot(&bvector![4.0, -5.0, 6.0]), 12.0);
+    }
+
+    #[test]
+    fn add_is_element_wise() {
+        assert_eq!(bvector![1.0, 2.0] + bvector![0.5, -3.0], bvector![1.5, -1.0]);
+    }
+
+    #[test]
+    #[should_panic(expected = "Index out of bounds")]
+    fn get_rejects_an_index_past_the_end() {
+        bvector![1.0, 2.0].get(2);
+    }
+}
