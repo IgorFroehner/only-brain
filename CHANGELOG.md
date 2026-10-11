@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.4.0
+
+Batch inference, and a faster `feed_forward` for small networks.
 
 ### Added
 
