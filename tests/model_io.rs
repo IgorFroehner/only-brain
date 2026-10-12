@@ -292,6 +292,43 @@ fn a_legacy_network_wide_activation_applies_to_every_layer() {
 }
 
 #[test]
+fn every_pre_0_3_activation_loads_from_a_legacy_file() {
+    for activation in [
+        ActivationFunction::Sigmoid,
+        ActivationFunction::Tanh,
+        ActivationFunction::ReLU,
+        ActivationFunction::BinaryStep,
+    ] {
+        let temp = TempModelPath::new("raw-old-activation");
+        write_raw_with_activation(&temp, vec![raw_layer(3, 2), raw_layer(2, 3)], Some(activation));
+
+        let loaded = load_model::<2, 2>(temp.path()).expect("legacy file should load");
+
+        assert_eq!(loaded.output_activation(), activation);
+    }
+}
+
+/// The legacy format is frozen at the four functions that existed before 0.3, so a
+/// later function's index (Identity is 4) there means the file is not a legacy model,
+/// rather than growing the old format with the new code table.
+#[test]
+fn a_legacy_file_with_a_function_added_after_0_3_is_unrecognized() {
+    for activation in [
+        ActivationFunction::Identity,
+        ActivationFunction::LeakyReLU,
+        ActivationFunction::SiLU,
+    ] {
+        let temp = TempModelPath::new("raw-new-activation");
+        write_raw_with_activation(&temp, vec![raw_layer(3, 2), raw_layer(2, 3)], Some(activation));
+
+        assert!(
+            matches!(load_model::<2, 2>(temp.path()), Err(ModelError::UnrecognizedFormat)),
+            "{activation:?}"
+        );
+    }
+}
+
+#[test]
 fn a_legacy_file_with_no_layers_reports_an_empty_network() {
     let temp = TempModelPath::new("raw-empty");
     write_raw(&temp, vec![]);
