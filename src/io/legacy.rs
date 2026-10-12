@@ -39,10 +39,15 @@ fn read_network<R: Read>(layer_count: u64, decoder: &mut Decoder<R>) -> Result<N
 
     let activation = match decoder.u8()? {
         0 => ActivationFunction::default(),
-        1 => u8::try_from(decoder.u32()?)
-            .ok()
-            .and_then(ActivationFunction::from_code)
-            .ok_or(ModelError::UnrecognizedFormat)?,
+        // The four functions that existed before 0.3, by their variant index then.
+        // This table is frozen: functions added later never appear in these files.
+        1 => match decoder.u32()? {
+            0 => ActivationFunction::Sigmoid,
+            1 => ActivationFunction::Tanh,
+            2 => ActivationFunction::ReLU,
+            3 => ActivationFunction::BinaryStep,
+            _ => return Err(ModelError::UnrecognizedFormat),
+        },
         _ => return Err(ModelError::UnrecognizedFormat),
     };
     for layer in &mut layers {

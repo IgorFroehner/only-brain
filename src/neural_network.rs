@@ -922,7 +922,9 @@ mod trace_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::activation_functions::{binary_step, identity, relu, sigmoid, tanh};
+    use crate::activation_functions::{
+        binary_step, elu, identity, leaky_relu, relu, sigmoid, silu, softplus, tanh,
+    };
     use rand::rngs::StdRng;
     use rand::SeedableRng;
 
@@ -1105,7 +1107,12 @@ mod tests {
             (ActivationFunction::ReLU, relu),
             (ActivationFunction::BinaryStep, binary_step),
             (ActivationFunction::Identity, identity),
+            (ActivationFunction::LeakyReLU, leaky_relu),
+            (ActivationFunction::ELU, elu),
+            (ActivationFunction::Softplus, softplus),
+            (ActivationFunction::SiLU, silu),
         ];
+        assert_eq!(cases.len(), ActivationFunction::ALL.len());
 
         for (variant, expected) in cases {
             let mut nn = fixed_network();
@@ -1113,6 +1120,8 @@ mod tests {
 
             assert_eq!(nn.layer_activation(1), variant);
             assert_all_close(&nn.feed_forward(&[1.0, 2.0]), &[expected(0.1)]);
+            // A negative weighted sum, for the functions that branch at zero.
+            assert_all_close(&nn.feed_forward(&[-1.0, 2.0]), &[expected(-0.9)]);
         }
     }
 

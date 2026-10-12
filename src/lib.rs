@@ -97,7 +97,7 @@ mod init;
 pub use io::*;
 pub use neural_network::*;
 pub use perceptron::*;
-pub use activation_functions::ActivationFunction;
+pub use activation_functions::{argmax, softmax, ActivationFunction};
 #[allow(deprecated)]
 pub use bvector::*;
 pub use init::Init;

@@ -17,7 +17,7 @@
 //! | Field | Type | Meaning |
 //! |---|---|---|
 //! | neurons | `u32` | number of neurons in this layer |
-//! | activation | `u8` | 0 sigmoid, 1 tanh, 2 ReLU, 3 binary step, 4 identity |
+//! | activation | `u8` | 0 sigmoid, 1 tanh, 2 ReLU, 3 binary step, 4 identity, 5 leaky ReLU, 6 ELU, 7 softplus, 8 SiLU |
 //! | weights | `f64` × neurons × previous layer's neurons | one row per neuron |
 //! | biases | `f64` × neurons | one per neuron |
 //!

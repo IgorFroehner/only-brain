@@ -58,11 +58,12 @@ commands before considering a change done.
 ## Architecture
 
 All modules are private and re-exported flat from `src/lib.rs`, so the public API is
-`only_brain::{NeuralNetwork, Trace, ActivationFunction, Init, Perceptron, dump_model,
-load_model, write_model, read_model, ModelError, MODEL_FORMAT_VERSION}`, plus the
-deprecated `BVector` and `bvector!`. `src/lib.rs` re-exports `activation_functions`
-by name: the plain `fn(f64) -> f64` functions there are `pub(crate)`, and a public
-helper function added to that module must also be listed in that `pub use`.
+`only_brain::{NeuralNetwork, Trace, ActivationFunction, softmax, argmax, Init,
+Perceptron, dump_model, load_model, write_model, read_model, ModelError,
+MODEL_FORMAT_VERSION}`, plus the deprecated `BVector` and `bvector!`. `src/lib.rs`
+re-exports `activation_functions` by name: the plain `fn(f64) -> f64` functions there
+are `pub(crate)`, and a public helper function added to that module must also be
+listed in that `pub use`.
 
 - `src/neural_network.rs`: `NeuralNetwork<IN, OUT>` is a `Vec<Layer>`. The input
   layer is **layer 0** in every public index, has no weights, and is not stored.
@@ -99,7 +100,9 @@ helper function added to that module must also be listed in that `pub use`.
   stream.
 - `src/activation_functions.rs`: `ActivationFunction` enum (`#[non_exhaustive]`,
   default `Sigmoid`), the crate-private `fn(f64) -> f64` behind each (the public way
-  is `ActivationFunction::apply`), and the frozen file codes.
+  is `ActivationFunction::apply`), the frozen file codes, and the public `softmax`
+  and `argmax` helpers. Softmax is deliberately not a variant: it needs the whole
+  layer, and the file format stores one per-neuron function code per layer.
 - `src/init.rs`: `Init` (`#[non_exhaustive]`), the weight ranges behind
   `NeuralNetwork::new_with_init`. `Layer::random` draws from them; `Init::default()`
   is the `[-1, 1)` that `new` and `new_with_rng` have always used, and their output

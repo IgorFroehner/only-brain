@@ -2,8 +2,10 @@
 
 ## 0.5.0
 
-Plain arrays at the whole boundary, a `Perceptron` on par with `NeuralNetwork`,
-scaled initialisation and tidier names.
+Plain arrays at the whole boundary and a `Perceptron` on par with `NeuralNetwork`;
+what backpropagation needs (a traced forward pass and activation derivatives); four
+new activation functions and a `softmax` helper; scaled initialisation and tidier
+names.
 
 ### Added
 
@@ -34,6 +36,20 @@ scaled initialisation and tidier names.
 - The `iris_backprop` example, which trains a 4-8-3 classifier on the Iris dataset
   with backpropagation and SGD written against the public API, reaching 96.7% test
   accuracy. CI runs it.
+- `ActivationFunction::LeakyReLU` (slope fixed at 0.01 for `x < 0`),
+  `ActivationFunction::ELU` (`α = 1`), `ActivationFunction::Softplus` (`ln(1 + e^x)`,
+  computed so it neither overflows nor underflows early for large `|x|`) and
+  `ActivationFunction::SiLU` (swish, `x · sigmoid(x)`), with their derivatives. They
+  are stored in model files as activation codes 5, 6, 7 and 8, and the format version
+  stays 1. Compatibility: a 0.3 or 0.4 reader reports a model that uses one of them
+  as `ModelError::Malformed` ("unknown activation function code"), and JSON or other
+  serde output naming one of them does not deserialize in 0.4. Models using only the
+  older functions are byte-for-byte unchanged and still load everywhere.
+- `softmax(&[f64; N]) -> [f64; N]`, a numerically stable softmax (it subtracts the
+  maximum first), and `argmax(&[f64; N]) -> usize`, the index of the largest value.
+  Softmax is not an `ActivationFunction`, because each output depends on the whole
+  layer; the pattern is an `Identity` output layer and
+  `softmax(&nn.feed_forward(&x))`. The `iris_backprop` example uses both.
 
 ### Changed
 
@@ -53,6 +69,13 @@ scaled initialisation and tidier names.
   removed in a later release.
 - Deprecated `NeuralNetwork::get_weight` and `NeuralNetwork::get_bias` in favour of
   `weight` and `bias`. They still work. Migration: drop the `get_` prefix.
+
+### Fixed
+
+- A pre-0.3 file whose activation tag is 4 or higher is reported as
+  `ModelError::UnrecognizedFormat`. Only tags 0 to 3 (sigmoid, tanh, ReLU, binary step)
+  existed in that format, but the reader looked tags up in the current code table, so
+  such a file loaded with `Identity` or one of the new functions.
 
 ### Removed
 
