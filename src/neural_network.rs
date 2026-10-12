@@ -608,7 +608,7 @@ impl<const IN: usize, const OUT: usize> NeuralNetwork<IN, OUT> {
     /// assert_eq!(nn.weight(2, 0, 1), 0.5);
     /// ```
     pub fn weight(&self, layer: usize, neuron: usize, input: usize) -> f64 {
-        self.layer(layer).weights()[(neuron, input)]
+        self.layer(layer).weight(neuron, input)
     }
 
     /// Gets the weight of a specific neuron connection. The layer index must be greater
@@ -1127,6 +1127,23 @@ mod tests {
         nn.set_layer_activation(2, ActivationFunction::Tanh);
 
         let inputs: Vec<[f64; 3]> = (0..7).map(|i| [i as f64 * 0.3 - 1.0, 0.5, -(i as f64)]).collect();
+
+        let batch = nn.feed_forward_batch(&inputs);
+
+        assert_eq!(batch.len(), inputs.len());
+        for (input, output) in inputs.iter().zip(&batch) {
+            assert_all_close(output, &nn.feed_forward(input));
+        }
+    }
+
+    /// nalgebra only hands a product to matrixmultiply when every dimension is above 5,
+    /// so the test above never reaches that path; this one does on every layer.
+    #[test]
+    fn feed_forward_batch_matches_feed_forward_on_wide_layers() {
+        let nn = NeuralNetwork::<8, 6>::new_with_rng(&[12, 7], &mut StdRng::seed_from_u64(7));
+        let inputs: Vec<[f64; 8]> = (0..9)
+            .map(|i| std::array::from_fn(|j| (i * 8 + j) as f64 * 0.05 - 1.0))
+            .collect();
 
         let batch = nn.feed_forward_batch(&inputs);
 
