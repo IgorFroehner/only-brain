@@ -117,16 +117,40 @@ fn per_layer_activation_functions_survive_a_round_trip() {
     assert_eq!(loaded, original);
 }
 
+/// Also pins each function's byte in the file and its name in the serde form, both
+/// of which are part of the format and must never change.
 #[test]
 fn every_activation_function_survives_a_round_trip() {
-    for activation in ActivationFunction::ALL {
+    let expected = [
+        (ActivationFunction::Sigmoid, 0, "Sigmoid"),
+        (ActivationFunction::Tanh, 1, "Tanh"),
+        (ActivationFunction::ReLU, 2, "ReLU"),
+        (ActivationFunction::BinaryStep, 3, "BinaryStep"),
+        (ActivationFunction::Identity, 4, "Identity"),
+        (ActivationFunction::LeakyReLU, 5, "LeakyReLU"),
+        (ActivationFunction::ELU, 6, "ELU"),
+        (ActivationFunction::Softplus, 7, "Softplus"),
+        (ActivationFunction::SiLU, 8, "SiLU"),
+    ];
+    assert_eq!(expected.len(), ActivationFunction::ALL.len());
+
+    for (activation, code, name) in expected {
         let mut original = sample_network();
-        original.set_output_activation(activation);
+        original.set_activation_function(activation);
 
-        let loaded: NeuralNetwork<2, 2> = read_model(to_bytes(&original).as_slice())
-            .expect("read should succeed");
+        let bytes = to_bytes(&original);
+        // magic (8) + version (2) + inputs (4) + layers (4) + first layer's neurons (4)
+        assert_eq!(bytes[22], code, "{activation:?}");
 
+        let loaded: NeuralNetwork<2, 2> = read_model(bytes.as_slice()).expect("read should succeed");
+        assert_eq!(loaded.layer_activation(1), activation);
         assert_eq!(loaded.output_activation(), activation);
+        assert_eq!(loaded, original);
+
+        let json = serde_json::to_string(&original).unwrap();
+        assert!(json.contains(&format!(r#""activation":"{name}""#)), "{json}");
+        let from_json: NeuralNetwork<2, 2> = serde_json::from_str(&json).unwrap();
+        assert_eq!(from_json, original);
     }
 }
 

@@ -7,6 +7,12 @@ use serde::{Deserialize, Serialize};
 /// [`Tanh`](Self::Tanh) for hidden layers, with [`Tanh`](Self::Tanh) for outputs in
 /// `[-1, 1]`, [`Sigmoid`](Self::Sigmoid) for outputs in `[0, 1]`, or
 /// [`Identity`](Self::Identity) for unbounded outputs.
+///
+/// [`LeakyReLU`](Self::LeakyReLU), [`ELU`](Self::ELU), [`Softplus`](Self::Softplus)
+/// and [`SiLU`](Self::SiLU) are smoother or never-flat alternatives to
+/// [`ReLU`](Self::ReLU) for hidden layers: their slope for negative inputs is not
+/// zero, so neurons pushed below zero can still recover. Their parameters are fixed,
+/// because the model file stores a single byte per layer for its activation.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum ActivationFunction {
@@ -21,16 +27,32 @@ pub enum ActivationFunction {
     BinaryStep,
     /// `x`, unchanged.
     Identity,
+    /// `x` for `x >= 0`, else `0.01 · x`. The slope for negative inputs is fixed at
+    /// `0.01`.
+    LeakyReLU,
+    /// Exponential linear unit with `α = 1`: `x` for `x >= 0`, else `e^x - 1`, in
+    /// `(-1, ∞)`.
+    ELU,
+    /// `ln(1 + e^x)`, a smooth [`ReLU`](Self::ReLU), in `(0, ∞)`. Computed in a form
+    /// that neither overflows for large `x` nor loses precision for very negative `x`.
+    Softplus,
+    /// Sigmoid linear unit, also called swish: `x · sigmoid(x)`, in about
+    /// `[-0.278, ∞)`.
+    SiLU,
 }
 
 impl ActivationFunction {
     /// Every activation function, in declaration order.
-    pub const ALL: [ActivationFunction; 5] = [
+    pub const ALL: [ActivationFunction; 9] = [
         ActivationFunction::Sigmoid,
         ActivationFunction::Tanh,
         ActivationFunction::ReLU,
         ActivationFunction::BinaryStep,
         ActivationFunction::Identity,
+        ActivationFunction::LeakyReLU,
+        ActivationFunction::ELU,
+        ActivationFunction::Softplus,
+        ActivationFunction::SiLU,
     ];
 
     /// Applies the function to `x`.
@@ -47,14 +69,20 @@ impl ActivationFunction {
     /// The derivative of the function with respect to its input `x`, the neuron's
     /// pre-activation (weighted sum), as backpropagation needs it.
     ///
-    /// Two functions are not differentiable everywhere, so they follow a convention:
+    /// Three functions are not differentiable everywhere, so they follow a convention:
     ///
     /// - [`ReLU`](Self::ReLU) has derivative `1` for `x > 0` and `0` for `x <= 0`,
     ///   so `0` at `x = 0`, the usual choice in deep learning libraries.
+    /// - [`LeakyReLU`](Self::LeakyReLU) likewise has derivative `1` for `x > 0` and
+    ///   `0.01` for `x <= 0`, so `0.01` at `x = 0`.
     /// - [`BinaryStep`](Self::BinaryStep) has derivative `0` everywhere, including at
     ///   `x = 0` where it jumps. No gradient flows through it, so a layer using it
     ///   cannot be trained by gradient descent; train it with a gradient-free method,
     ///   such as a genetic algorithm, instead.
+    ///
+    /// [`ELU`](Self::ELU) with `α = 1` has derivative `1` from both sides at `x = 0`,
+    /// and [`Softplus`](Self::Softplus) and [`SiLU`](Self::SiLU) are smooth, so they
+    /// need no convention.
     ///
     /// # Example
     ///
@@ -67,6 +95,12 @@ impl ActivationFunction {
     /// assert_eq!(ActivationFunction::ReLU.derivative(0.0), 0.0);
     /// assert_eq!(ActivationFunction::BinaryStep.derivative(0.0), 0.0);
     /// assert_eq!(ActivationFunction::Identity.derivative(-2.0), 1.0);
+    /// assert_eq!(ActivationFunction::LeakyReLU.derivative(-2.0), 0.01);
+    /// assert_eq!(ActivationFunction::ELU.derivative(0.0), 1.0);
+    /// // softplus'(x) = sigmoid(x)
+    /// assert_eq!(ActivationFunction::Softplus.derivative(0.0), 0.5);
+    /// // silu'(0) = sigmoid(0)
+    /// assert_eq!(ActivationFunction::SiLU.derivative(0.0), 0.5);
     /// ```
     pub fn derivative(self, x: f64) -> f64 {
         match self {
@@ -83,13 +117,25 @@ impl ActivationFunction {
             }
             ActivationFunction::BinaryStep => 0.0,
             ActivationFunction::Identity => 1.0,
+            ActivationFunction::LeakyReLU => {
+                if x > 0.0 { 1.0 } else { LEAKY_RELU_SLOPE }
+            }
+            ActivationFunction::ELU => {
+                if x >= 0.0 { 1.0 } else { x.exp() }
+            }
+            ActivationFunction::Softplus => sigmoid(x),
+            ActivationFunction::SiLU => {
+                let s = sigmoid(x);
+                s * (1.0 + x * (1.0 - s))
+            }
         }
     }
 
     /// The byte that stands for this function in the model file format.
     ///
     /// These codes are part of the format and never change; new functions get new
-    /// codes. The first four match the order of the format before 0.3.
+    /// codes. The first four match the order of the format before 0.3; 4 was added in
+    /// 0.3 and 5 to 8 in 0.5.
     pub(crate) fn code(self) -> u8 {
         match self {
             ActivationFunction::Sigmoid => 0,
@@ -97,6 +143,10 @@ impl ActivationFunction {
             ActivationFunction::ReLU => 2,
             ActivationFunction::BinaryStep => 3,
             ActivationFunction::Identity => 4,
+            ActivationFunction::LeakyReLU => 5,
+            ActivationFunction::ELU => 6,
+            ActivationFunction::Softplus => 7,
+            ActivationFunction::SiLU => 8,
         }
     }
 
@@ -126,6 +176,27 @@ pub(crate) fn identity(x: f64) -> f64 {
     x
 }
 
+/// The slope of [`ActivationFunction::LeakyReLU`] for negative inputs.
+const LEAKY_RELU_SLOPE: f64 = 0.01;
+
+pub(crate) fn leaky_relu(x: f64) -> f64 {
+    if x >= 0.0 { x } else { LEAKY_RELU_SLOPE * x }
+}
+
+pub(crate) fn elu(x: f64) -> f64 {
+    if x >= 0.0 { x } else { x.exp_m1() }
+}
+
+/// `ln(1 + e^x)` rewritten as `max(x, 0) + ln(1 + e^-|x|)`, so `e^x` never overflows
+/// for large `x`, and `ln_1p` keeps the tiny result exact for very negative `x`.
+pub(crate) fn softplus(x: f64) -> f64 {
+    x.max(0.0) + (-x.abs()).exp().ln_1p()
+}
+
+pub(crate) fn silu(x: f64) -> f64 {
+    x * sigmoid(x)
+}
+
 /// Returns the plain function behind an [`ActivationFunction`].
 pub(crate) fn get_activation_function(func: ActivationFunction) -> fn(f64) -> f64 {
     match func {
@@ -134,6 +205,10 @@ pub(crate) fn get_activation_function(func: ActivationFunction) -> fn(f64) -> f6
         ActivationFunction::ReLU => relu,
         ActivationFunction::BinaryStep => binary_step,
         ActivationFunction::Identity => identity,
+        ActivationFunction::LeakyReLU => leaky_relu,
+        ActivationFunction::ELU => elu,
+        ActivationFunction::Softplus => softplus,
+        ActivationFunction::SiLU => silu,
     }
 }
 
@@ -187,6 +262,10 @@ mod tests {
             (ActivationFunction::ReLU, relu),
             (ActivationFunction::BinaryStep, binary_step),
             (ActivationFunction::Identity, identity),
+            (ActivationFunction::LeakyReLU, leaky_relu),
+            (ActivationFunction::ELU, elu),
+            (ActivationFunction::Softplus, softplus),
+            (ActivationFunction::SiLU, silu),
         ];
         assert_eq!(cases.len(), ActivationFunction::ALL.len());
 
@@ -207,23 +286,29 @@ mod tests {
             (ActivationFunction::ReLU, 2),
             (ActivationFunction::BinaryStep, 3),
             (ActivationFunction::Identity, 4),
+            (ActivationFunction::LeakyReLU, 5),
+            (ActivationFunction::ELU, 6),
+            (ActivationFunction::Softplus, 7),
+            (ActivationFunction::SiLU, 8),
         ];
+        assert_eq!(expected.len(), ActivationFunction::ALL.len());
 
         for (function, code) in expected {
             assert_eq!(function.code(), code);
             assert_eq!(ActivationFunction::from_code(code), Some(function));
         }
-        assert_eq!(ActivationFunction::from_code(5), None);
+        assert_eq!(ActivationFunction::from_code(9), None);
     }
 
     /// Compares every derivative with a central finite difference of `apply`, away
-    /// from zero, where ReLU and BinaryStep are not differentiable.
+    /// from zero, where ReLU, LeakyReLU and BinaryStep are not differentiable. The
+    /// points close to zero check both sides of the ELU and LeakyReLU branches.
     #[test]
     fn every_derivative_matches_a_numeric_derivative() {
         const H: f64 = 1e-6;
 
         for function in ActivationFunction::ALL {
-            for x in [-3.0, -1.2, -0.4, 0.3, 0.9, 2.5] {
+            for x in [-8.0, -3.0, -1.2, -0.4, -0.01, 0.01, 0.3, 0.9, 2.5, 8.0] {
                 let numeric = (function.apply(x + H) - function.apply(x - H)) / (2.0 * H);
                 let analytic = function.derivative(x);
                 assert!(
@@ -242,6 +327,21 @@ mod tests {
     }
 
     #[test]
+    fn leaky_relu_derivative_is_the_leak_at_zero_and_one_just_above() {
+        assert_eq!(ActivationFunction::LeakyReLU.derivative(-0.0), 0.01);
+        assert_eq!(ActivationFunction::LeakyReLU.derivative(0.0), 0.01);
+        assert_eq!(ActivationFunction::LeakyReLU.derivative(f64::MIN_POSITIVE), 1.0);
+    }
+
+    /// With `α = 1` both branches of ELU have slope 1 at zero.
+    #[test]
+    fn elu_derivative_is_continuous_at_zero() {
+        assert_eq!(ActivationFunction::ELU.derivative(0.0), 1.0);
+        assert_eq!(ActivationFunction::ELU.derivative(-0.0), 1.0);
+        assert_close(ActivationFunction::ELU.derivative(-f64::MIN_POSITIVE), 1.0);
+    }
+
+    #[test]
     fn binary_step_derivative_is_zero_everywhere_including_the_jump() {
         for x in [-1.0, -f64::MIN_POSITIVE, 0.0, f64::MIN_POSITIVE, 1.0] {
             assert_eq!(ActivationFunction::BinaryStep.derivative(x), 0.0);
@@ -254,6 +354,52 @@ mod tests {
             assert_eq!(function.derivative(1000.0), 0.0);
             assert_eq!(function.derivative(-1000.0), 0.0);
         }
+    }
+
+    #[test]
+    fn leaky_relu_scales_negatives_by_one_hundredth() {
+        assert_close(leaky_relu(-3.0), -0.03);
+        assert_close(leaky_relu(0.0), 0.0);
+        assert_close(leaky_relu(2.25), 2.25);
+    }
+
+    #[test]
+    fn elu_is_bounded_below_by_minus_one_and_linear_above_zero() {
+        assert_close(elu(0.0), 0.0);
+        assert_close(elu(2.25), 2.25);
+        assert_close(elu(-1.0), (-1.0f64).exp() - 1.0);
+        assert_eq!(elu(-1000.0), -1.0);
+    }
+
+    #[test]
+    fn softplus_is_ln_two_at_zero_and_matches_the_naive_formula() {
+        assert_close(softplus(0.0), 2f64.ln());
+        for x in [-5.0, -1.0, 0.5, 3.0, 20.0] {
+            assert_close(softplus(x), (1.0 + f64::exp(x)).ln());
+        }
+    }
+
+    /// The naive `ln(1 + e^x)` returns infinity at `x = 1000`, because `e^1000`
+    /// overflows, and 0 for very negative `x` long before the true value underflows.
+    #[test]
+    fn softplus_is_stable_for_large_inputs() {
+        assert_eq!(softplus(1000.0), 1000.0);
+        assert_eq!(softplus(-1000.0), 0.0);
+        assert_eq!(softplus(-40.0), (-40.0f64).exp());
+        for function in [ActivationFunction::Softplus, ActivationFunction::SiLU] {
+            assert_eq!(function.derivative(1000.0), 1.0);
+            assert_eq!(function.derivative(-1000.0), 0.0);
+        }
+    }
+
+    #[test]
+    fn silu_is_x_times_sigmoid() {
+        assert_close(silu(0.0), 0.0);
+        for x in [-3.0, -1.0, 0.5, 2.0] {
+            assert_close(silu(x), x * sigmoid(x));
+        }
+        assert_eq!(silu(1000.0), 1000.0);
+        assert_eq!(silu(-1000.0), 0.0);
     }
 
     #[test]
