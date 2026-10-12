@@ -111,10 +111,13 @@ fn train_step(nn: &mut Classifier, sample: &Sample, learning_rate: f64) -> f64 {
         let mut weights = nn.layer_weights(layer);
 
         // Pass the gradient on to the previous layer's outputs, through the weights
-        // as they were in the forward pass.
-        output_gradient = (0..inputs.len())
-            .map(|input| delta.iter().zip(&weights).map(|(d, row)| d * row[input]).sum())
-            .collect();
+        // as they were in the forward pass. Layer 1's previous layer is the inputs,
+        // which have nothing to train.
+        if layer > 1 {
+            output_gradient = (0..inputs.len())
+                .map(|input| delta.iter().zip(&weights).map(|(d, row)| d * row[input]).sum())
+                .collect();
+        }
 
         for (row, d) in weights.iter_mut().zip(&delta) {
             for (weight, x) in row.iter_mut().zip(inputs) {

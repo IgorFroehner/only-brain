@@ -140,9 +140,12 @@ for layer in (1..nn.num_layers()).rev() {
 
     let inputs = trace.outputs(layer - 1); // layer 0's outputs are the inputs
     let mut weights = nn.layer_weights(layer);
-    gradient = (0..inputs.len())
-        .map(|i| delta.iter().zip(&weights).map(|(d, row)| d * row[i]).sum())
-        .collect();
+    if layer > 1 {
+        // Pass the gradient back to the previous layer (layer 1's is the inputs).
+        gradient = (0..inputs.len())
+            .map(|i| delta.iter().zip(&weights).map(|(d, row)| d * row[i]).sum())
+            .collect();
+    }
 
     for (row, d) in weights.iter_mut().zip(&delta) {
         for (w, x) in row.iter_mut().zip(inputs) {
