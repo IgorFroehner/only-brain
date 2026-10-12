@@ -1,12 +1,18 @@
+// The type is deprecated, but this module still defines and tests it.
+#![allow(deprecated)]
+
 use std::ops;
 
 use nalgebra::{SimdRealField, SVector};
 
-/// This module provides a vector type `BVector` that is optimized for compile-time
-/// dimension and uses SIMD operations for performance.
+/// A vector with a compile-time dimension, once the input type of [`crate::Perceptron`].
+///
+/// Deprecated: [`crate::Perceptron`] now takes plain arrays, so `bvector![a, b]` becomes
+/// `[a, b]`. An existing `BVector` converts with `.into()`.
+#[deprecated(since = "0.5.0", note = "use a plain array `[T; N]`, which `Perceptron` now takes; convert an existing `BVector` with `.into()`")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct BVector<T: SimdRealField + Copy, const N: usize> {
-    pub data_vector: SVector<T, N>,
+    data_vector: SVector<T, N>,
 }
 
 impl<T: SimdRealField + Copy, const N: usize> BVector<T, N> {
@@ -56,12 +62,18 @@ impl<T: SimdRealField + Copy, const N: usize> ops::Add for BVector<T, N> {
     }
 }
 
+impl<T: SimdRealField + Copy, const N: usize> From<BVector<T, N>> for [T; N] {
+    /// The elements in order, for code moving from `BVector` to plain arrays.
+    fn from(vector: BVector<T, N>) -> Self {
+        std::array::from_fn(|index| vector.data_vector[index])
+    }
+}
+
 /// Macro to construct a `BVector` with compile-time dimension inferred from the
 /// number of elements provided.
 ///
-/// Example:
-/// - `let v = bvector![1.0, 2.0, 3.0]; // BVector<f64, 3>`
-/// - `let v = bvector![2.0, -1.5]; // BVector<f64, 2>`
+/// Deprecated with [`BVector`]: write the array itself, `[1.0, 2.0, 3.0]`.
+#[deprecated(since = "0.5.0", note = "use a plain array, `[a, b, c]`")]
 #[macro_export]
 macro_rules! bvector {
     ($($x:expr),+ $(,)?) => {
@@ -112,6 +124,13 @@ mod tests {
     #[test]
     fn add_is_element_wise() {
         assert_eq!(bvector![1.0, 2.0] + bvector![0.5, -3.0], bvector![1.5, -1.0]);
+    }
+
+    #[test]
+    fn converts_into_an_array_in_order() {
+        let array: [f64; 3] = bvector![1.0, -2.0, 3.0].into();
+
+        assert_eq!(array, [1.0, -2.0, 3.0]);
     }
 
     #[test]

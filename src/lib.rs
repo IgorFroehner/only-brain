@@ -74,6 +74,7 @@ pub use io::*;
 pub use neural_network::*;
 pub use perceptron::*;
 pub use activation_functions::ActivationFunction;
+#[allow(deprecated)]
 pub use bvector::*;
 pub use init::Init;
 
