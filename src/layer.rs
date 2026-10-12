@@ -68,7 +68,7 @@ impl Layer {
     /// exactly [`size()`](Self::size) values.
     pub fn forward_into(&self, inputs: &[f64], outputs: &mut [f64]) {
         self.weighted_inputs_into(inputs, outputs);
-        add_bias_and_activate(self.activation, outputs, self.biases.as_slice());
+        add_bias_and_activate(self.activation, self.biases.as_slice(), [outputs]);
     }
 
     /// Computes this layer's outputs for every column of `inputs` into the matching
@@ -78,9 +78,12 @@ impl Layer {
     /// [`size()`](Self::size) rows, with one column per sample in both.
     pub fn forward_batch_into(&self, inputs: DMatrixView<'_, f64>, mut outputs: DMatrixViewMut<'_, f64>) {
         outputs.gemm(1.0, &self.weights, &inputs, 0.0);
-        for mut column in outputs.column_iter_mut() {
-            add_bias_and_activate(self.activation, column.as_mut_slice(), self.biases.as_slice());
-        }
+
+        // Each column of the view is contiguous even though the view is not (it is the
+        // top rows of a taller matrix), so it can be handed over as a slice. One call
+        // covers every column, so the activation is matched once per layer.
+        let columns = outputs.column_iter_mut().map(|column| column.data.into_slice_mut());
+        add_bias_and_activate(self.activation, self.biases.as_slice(), columns);
     }
 
     /// The number of neurons.

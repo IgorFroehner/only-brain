@@ -107,9 +107,11 @@ listed in that `pub use`.
   is `ActivationFunction::apply`), the frozen file codes, and the public `softmax`
   and `argmax` helpers. Softmax is deliberately not a variant: it needs the whole
   layer, and the file format stores one per-neuron function code per layer.
-  `add_bias_and_activate` is the forward passes' hot loop: it matches the variant
-  once per layer, with no wildcard arm so a new variant does not compile until it is
-  handled, and runs a loop monomorphized for that function. Adding the bias in the
+  `add_bias_and_activate` is the forward passes' hot loop. It takes an iterator of
+  columns (one for `forward_into`, one per sample for `forward_batch_into`) and
+  matches the variant once per call, so once per layer on both paths, with no
+  wildcard arm so a new variant does not compile until it is handled; each arm runs
+  a loop monomorphized for that function over every column. Adding the bias in the
   same loop is deliberate: a separate bias pass followed by the (two-lane vectorized)
   sigmoid loop made the 4-6-2 benchmark 31% slower, most likely through failed
   store-to-load forwarding on layers narrower than 8 neurons.
