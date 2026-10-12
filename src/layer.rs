@@ -4,7 +4,6 @@ use rand::distr::Uniform;
 use rand::Rng;
 
 use crate::activation_functions::{get_activation_function, ActivationFunction};
-use crate::init::Init;
 
 /// One layer of neurons: a weight matrix with one row per neuron and one column per
 /// input, a bias per neuron, and the activation applied to every neuron.
@@ -18,7 +17,7 @@ pub struct Layer {
 impl Layer {
     /// A layer with weights drawn uniformly from the range `init` gives for its shape,
     /// and zero biases.
-    pub fn random<T: Rng>(neurons: usize, inputs: usize, activation: ActivationFunction, init: Init, rng: &mut T) -> Self {
+    pub fn random<T: Rng>(neurons: usize, inputs: usize, activation: ActivationFunction, init: crate::Init, rng: &mut T) -> Self {
         let (low, high) = init.bounds(neurons, inputs);
         let uniform = Uniform::new(low, high).expect("the initialisation range should be finite and non-empty");
 
