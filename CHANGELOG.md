@@ -5,7 +5,7 @@
 Plain arrays at the whole boundary and a `Perceptron` on par with `NeuralNetwork`;
 what backpropagation needs (a traced forward pass and activation derivatives); four
 new activation functions and a `softmax` helper; scaled initialisation and tidier
-names.
+names; in-place parameter mutation, and weights stored in the flat parameter order.
 
 ### Added
 
@@ -50,6 +50,13 @@ names.
   Softmax is not an `ActivationFunction`, because each output depends on the whole
   layer; the pattern is an `Identity` output layer and
   `softmax(&nn.feed_forward(&x))`. The `iris_backprop` example uses both.
+- `NeuralNetwork::for_each_parameter_mut(f)` and `NeuralNetwork::map_parameters(f)`,
+  which visit every weight and bias in place, in the documented flat parameter
+  order, and keep the activation functions. A genetic algorithm that keeps networks
+  rather than genomes can mutate a child without `parameters()` and
+  `set_parameters()` copying everything out and back: negating every parameter of a
+  16-16-16-4 network takes 41 ns in place against 152 ns through the round trip.
+  The `parameters` benchmark group compares the two.
 
 ### Changed
 
@@ -77,6 +84,20 @@ names.
   on a 64-128-64-10 network, for 256 inputs. A new benchmark group,
   `feed_forward_by_activation`, runs the 16-16-16-4 network with each function:
   every one is faster, from 3% for tanh and 4% for softplus to 11% for SiLU.
+- Each layer stores its weights transposed (one column per neuron), so in memory
+  they are already in the flat parameter order. `parameters`, `set_parameters`,
+  `from_parameters` and `write_model` copy whole slices instead of one weight at a
+  time, and `feed_forward` computes one dot product of contiguous weights per
+  neuron. On a 16-16-16-4 network `parameters` is 87% faster, `set_parameters` 76%
+  and `from_parameters` 44%; on a 64-128-64-10 network `write_model` is 52% faster
+  and `read_model` 34%. `feed_forward` is 26% faster on a 4-6-2 network, 21% on a
+  16-16-16-4 network and 17% on a 64-128-64-10 network. `feed_forward_batch` is
+  unchanged within noise (-1% on 16-16-16-4, +3% on 64-128-64-10, for 256 inputs):
+  it multiplies by a transposed copy of each layer's weights, because nalgebra's
+  transposed product does not use its fast matrix multiplication and was 85% slower
+  on the larger network. Numbers are the best of four alternating runs against the
+  previous layout. The flat parameter order, the model file format and the weights
+  `new` and `new_with_rng` draw for a seed are unchanged.
 
 ### Fixed
 

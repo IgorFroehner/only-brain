@@ -73,23 +73,35 @@ listed in that `pub use`.
   matrix size"`, `"Incompatible biases vector size"`, `"at least one neuron"`).
   `Trace`, returned by `feed_forward_trace`, lives here too and uses the same layer
   numbering: `outputs(0)` is the inputs, `pre_activations(0)` panics.
-- `src/layer.rs`: `Layer` holds a nalgebra `DMatrix` (one row per neuron,
-  column-major in memory) and a `DVector` of biases. nalgebra never crosses the
-  public boundary: every public method takes and returns arrays, slices or `Vec`s.
-  `forward_into` is the allocation-free hot path that `feed_forward` calls once per
-  layer with a single scratch buffer per call (on the stack when the widest layer
-  has at most 16 neurons, which a benchmark showed beats a larger stack buffer).
-  `forward_batch_into` is its `gemm` counterpart behind `feed_forward_batch`, one
-  column per sample. `pre_activations_into` computes `W·x + b` without the
-  activation, for `feed_forward_trace`. Both it and `forward_into` go through the
-  private `weighted_inputs_into`, the one copy of the single-sample `gemv` (`W·x`,
-  no biases). That helper is `#[inline(always)]` because a plain `#[inline]` was not
-  honoured and the extra call slowed the 4-6-2 benchmark. The biases are added
-  after it: `forward_into` and `forward_batch_into` add them in the same loop as the
-  activation (`add_bias_and_activate`, below), `pre_activations_into` on their own.
-  Each bias is added to the same product either way, so the trace stays
-  bit-identical to `feed_forward`. `extend_parameters` / `take_parameters` define
-  the flat order.
+- `src/layer.rs`: `Layer` holds a nalgebra `DMatrix` of weights and a `DVector` of
+  biases. **The weights are stored transposed**, `inputs × neurons` (one column per
+  neuron), so nalgebra's column-major memory is exactly the flat row-per-neuron
+  order: `extend_parameters`, `take_parameters`, `for_each_parameter_mut` and the
+  writer in `src/io.rs` (through `flat_weights()`) work on one contiguous slice.
+  Index the matrix as `weights[(input, neuron)]`; every `Layer` method still takes
+  and returns weights row per neuron (`from_parts`, `set_weights`, `weight_rows`,
+  `weight(neuron, input)`), and nalgebra never crosses the public boundary: every
+  public method takes and returns arrays, slices or `Vec`s. `Layer::random` fills
+  the matrix with `from_row_iterator` so the draws keep the order the untransposed
+  `from_fn` used, which `new_with_rng_draws_the_same_weights_as_before_init_existed`
+  guards. `forward_into` is the allocation-free hot path that `feed_forward` calls
+  once per layer with a single scratch buffer per call (on the stack when the widest
+  layer has at most 16 neurons, which a benchmark showed beats a larger stack
+  buffer). `forward_batch_into` is its `gemm` counterpart behind
+  `feed_forward_batch`, one column per sample; it multiplies by a transposed copy of
+  the weights, because nalgebra's `gemm_tr` does not use matrixmultiply (85% slower
+  on the 64-128-64-10 batch benchmark) and a swapped-stride view of the storage
+  trips an out-of-bounds read in nalgebra's small-matrix `gemm` path.
+  `pre_activations_into` computes `W·x + b` without the activation, for
+  `feed_forward_trace`. Both it and `forward_into` go through the private
+  `weighted_inputs_into`, the one copy of the single-sample product (`gemv_tr` on
+  the stored `Wᵀ`, so `W·x`, no biases). That helper is `#[inline(always)]` because
+  a plain `#[inline]` was not honoured and the extra call slowed the 4-6-2
+  benchmark. The biases are added after it: `forward_into` and `forward_batch_into`
+  add them in the same loop as the activation (`add_bias_and_activate`, below),
+  `pre_activations_into` on their own. Each bias is added to the same product either
+  way, so the trace stays bit-identical to `feed_forward`. `extend_parameters` /
+  `take_parameters` define the flat order.
 - **`NetworkData` / `LayerData` are the single validation funnel.** They are the
   serde form of a network (`{"layers": [{"activation", "weights", "biases"}]}`).
   `NeuralNetwork` is `#[serde(into = "NetworkData", try_from = "NetworkData")]`, and
