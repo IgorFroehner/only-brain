@@ -429,10 +429,32 @@ impl<const IN: usize, const OUT: usize> NeuralNetwork<IN, OUT> {
         self.layer_mut(layer).set_weight(neuron, input, weight);
     }
 
+    /// Returns the weight from neuron `input` of layer `layer - 1` to neuron `neuron` of
+    /// layer `layer`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `layer` is 0, since the input layer has no weights, or past the output
+    /// layer, or if `neuron` or `input` is out of range.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use only_brain::NeuralNetwork;
+    /// let mut nn = NeuralNetwork::<2, 1>::new(&[3]);
+    /// nn.set_weight(2, 0, 1, 0.5);
+    ///
+    /// assert_eq!(nn.weight(2, 0, 1), 0.5);
+    /// ```
+    pub fn weight(&self, layer: usize, neuron: usize, input: usize) -> f64 {
+        self.layer(layer).weights()[(neuron, input)]
+    }
+
     /// Gets the weight of a specific neuron connection. The layer index must be greater
     /// than 0 since the input layer does not have weights.
+    #[deprecated(since = "0.5.0", note = "renamed to `weight`")]
     pub fn get_weight(&self, layer: usize, neuron: usize, input: usize) -> f64 {
-        self.layer(layer).weights()[(neuron, input)]
+        self.weight(layer, neuron, input)
     }
 
     /// Sets the bias of a specific neuron. The layer index must be greater than 0 since
@@ -441,10 +463,31 @@ impl<const IN: usize, const OUT: usize> NeuralNetwork<IN, OUT> {
         self.layer_mut(layer).set_bias(neuron, bias);
     }
 
+    /// Returns the bias of neuron `neuron` of layer `layer`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `layer` is 0, since the input layer has no biases, or past the output
+    /// layer, or if `neuron` is out of range.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use only_brain::NeuralNetwork;
+    /// let mut nn = NeuralNetwork::<2, 1>::new(&[3]);
+    /// nn.set_bias(1, 2, -0.1);
+    ///
+    /// assert_eq!(nn.bias(1, 2), -0.1);
+    /// ```
+    pub fn bias(&self, layer: usize, neuron: usize) -> f64 {
+        self.layer(layer).biases()[neuron]
+    }
+
     /// Gets the bias of a specific neuron. The layer index must be greater than 0 since
     /// the input layer does not have biases.
+    #[deprecated(since = "0.5.0", note = "renamed to `bias`")]
     pub fn get_bias(&self, layer: usize, neuron: usize) -> f64 {
-        self.layer(layer).biases()[neuron]
+        self.bias(layer, neuron)
     }
 
     /// The layer that receives weights for `layer`, which counts the input layer as 0.
@@ -545,12 +588,6 @@ impl<const IN: usize, const OUT: usize> NeuralNetwork<IN, OUT> {
     /// Returns the activation function of the output layer.
     pub fn output_activation(&self) -> ActivationFunction {
         self.layer_activation(self.num_layers() - 1)
-    }
-
-    pub fn print(&self) {
-        for layer in &self.layers {
-            println!("{:?} {} {}", layer.activation(), layer.weights(), layer.biases());
-        }
     }
 }
 
@@ -695,8 +732,8 @@ mod tests {
             for neuron in 0..first.layer_size(layer) {
                 for input in 0..first.layer_size(layer - 1) {
                     assert_eq!(
-                        first.get_weight(layer, neuron, input),
-                        second.get_weight(layer, neuron, input),
+                        first.weight(layer, neuron, input),
+                        second.weight(layer, neuron, input),
                         "weight differs at layer {layer}, neuron {neuron}, input {input}"
                     );
                 }
@@ -790,11 +827,11 @@ mod tests {
     }
 
     #[test]
-    fn set_and_get_weight_round_trip() {
+    fn set_weight_and_weight_round_trip() {
         let mut nn = NeuralNetwork::<2, 2>::new(&[]);
         nn.set_weight(1, 1, 0, 0.75);
 
-        assert_eq!(nn.get_weight(1, 1, 0), 0.75);
+        assert_eq!(nn.weight(1, 1, 0), 0.75);
     }
 
     #[test]
@@ -853,8 +890,8 @@ mod tests {
 
         assert_eq!(nn.layer_weights(1), weights.map(Vec::from).to_vec());
         assert_eq!(nn.layer_biases(1), &[0.7, 0.8, 0.9]);
-        // Row = neuron, column = input, matching set_weight and get_weight.
-        assert_eq!(nn.get_weight(1, 2, 0), 0.5);
+        // Row = neuron, column = input, matching set_weight and weight.
+        assert_eq!(nn.weight(1, 2, 0), 0.5);
     }
 
     #[test]
@@ -884,12 +921,21 @@ mod tests {
     }
 
     #[test]
-    fn set_and_get_bias_round_trip() {
+    fn set_bias_and_bias_round_trip() {
         let mut nn = NeuralNetwork::<2, 2>::new(&[]);
         nn.set_bias(1, 1, -0.3);
 
-        assert_eq!(nn.get_bias(1, 1), -0.3);
+        assert_eq!(nn.bias(1, 1), -0.3);
         assert_eq!(nn.layer_biases(1), &[0.0, -0.3]);
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn the_deprecated_getters_still_read_the_same_values() {
+        let nn = numbered_network();
+
+        assert_eq!(nn.get_weight(1, 1, 0), nn.weight(1, 1, 0));
+        assert_eq!(nn.get_bias(2, 0), nn.bias(2, 0));
     }
 
     #[test]
@@ -967,8 +1013,8 @@ mod tests {
         nn.set_parameters(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]);
 
         assert_eq!(nn, numbered_network());
-        assert_eq!(nn.get_weight(1, 1, 0), 3.0);
-        assert_eq!(nn.get_bias(2, 0), 9.0);
+        assert_eq!(nn.weight(1, 1, 0), 3.0);
+        assert_eq!(nn.bias(2, 0), 9.0);
     }
 
     #[test]

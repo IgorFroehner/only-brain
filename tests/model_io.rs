@@ -78,8 +78,8 @@ fn a_dumped_model_loads_back_with_identical_structure_and_weights() {
         for neuron in 0..original.layer_size(layer) {
             for input in 0..original.layer_size(layer - 1) {
                 assert_eq!(
-                    loaded.get_weight(layer, neuron, input),
-                    original.get_weight(layer, neuron, input),
+                    loaded.weight(layer, neuron, input),
+                    original.weight(layer, neuron, input),
                     "weight mismatch at layer {layer}, neuron {neuron}, input {input}"
                 );
             }
@@ -638,6 +638,6 @@ fn a_model_written_by_an_earlier_version_still_loads() {
     assert_eq!(loaded.layer_size(1), 3);
     assert_eq!(loaded.layer_activation(1), ActivationFunction::BinaryStep);
     assert_eq!(loaded.output_activation(), ActivationFunction::BinaryStep);
-    assert_eq!(loaded.get_weight(1, 0, 0), 0.99);
-    assert_eq!(loaded.get_weight(2, 1, 2), 0.4);
+    assert_eq!(loaded.weight(1, 0, 0), 0.99);
+    assert_eq!(loaded.weight(2, 1, 2), 0.4);
 }
