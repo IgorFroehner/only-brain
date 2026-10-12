@@ -221,3 +221,66 @@ impl fmt::Display for Layer {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ROWS: [[f64; 2]; 3] = [[0.5, -0.25], [-1.0, 2.0], [0.0, 0.75]];
+    const BIASES: [f64; 3] = [0.1, -0.3, 0.0];
+    const SAMPLES: [[f64; 2]; 4] = [[1.0, 2.0], [-1.0, 0.5], [0.0, 0.0], [3.0, -2.0]];
+
+    fn layer(activation: ActivationFunction) -> Layer {
+        let rows: Vec<Vec<f64>> = ROWS.iter().map(|row| row.to_vec()).collect();
+        Layer::from_parts(&rows, &BIASES, activation, 2).expect("the parts form a layer")
+    }
+
+    /// What the layer outputs for one sample, computed the slow way through `apply`.
+    fn expected(activation: ActivationFunction, sample: [f64; 2]) -> Vec<f64> {
+        ROWS.iter()
+            .zip(BIASES)
+            .map(|(row, bias)| activation.apply(row[0] * sample[0] + row[1] * sample[1] + bias))
+            .collect()
+    }
+
+    fn assert_all_close(actual: &[f64], expected: &[f64]) {
+        assert_eq!(actual.len(), expected.len());
+        for (a, e) in actual.iter().zip(expected) {
+            assert!((a - e).abs() < 1e-12, "expected {expected:?}, got {actual:?}");
+        }
+    }
+
+    #[test]
+    fn forward_into_applies_every_activation_function_to_each_neuron() {
+        for activation in ActivationFunction::ALL {
+            let layer = layer(activation);
+
+            for sample in SAMPLES {
+                let mut outputs = [f64::NAN; 3];
+                layer.forward_into(&sample, &mut outputs);
+
+                assert_all_close(&outputs, &expected(activation, sample));
+            }
+        }
+    }
+
+    /// The outputs are the top rows of a taller matrix, as in `feed_forward_batch`, so
+    /// the columns are not contiguous with each other and the rows below must not be
+    /// touched.
+    #[test]
+    fn forward_batch_into_applies_every_activation_function_to_each_column() {
+        for activation in ActivationFunction::ALL {
+            let layer = layer(activation);
+            let inputs = DMatrix::from_fn(2, SAMPLES.len(), |input, sample| SAMPLES[sample][input]);
+            let mut outputs = DMatrix::from_element(5, SAMPLES.len(), f64::NAN);
+
+            layer.forward_batch_into(inputs.rows(0, 2), outputs.rows_mut(0, 3));
+
+            for (column, sample) in outputs.column_iter().zip(SAMPLES) {
+                let column: Vec<f64> = column.iter().copied().collect();
+                assert_all_close(&column[..3], &expected(activation, sample));
+                assert!(column[3..].iter().all(|value| value.is_nan()), "{activation:?} wrote past its rows");
+            }
+        }
+    }
+}
