@@ -82,10 +82,14 @@ listed in that `pub use`.
   `forward_batch_into` is its `gemm` counterpart behind `feed_forward_batch`, one
   column per sample. `pre_activations_into` computes `W·x + b` without the
   activation, for `feed_forward_trace`. Both it and `forward_into` go through the
-  private `weighted_sums_into`, the one copy of the single-sample `W·x + b`. That
-  helper is `#[inline(always)]` because a plain `#[inline]` was not honoured and the
-  extra call slowed the 4-6-2 benchmark. `extend_parameters` /
-  `take_parameters` define the flat order.
+  private `weighted_inputs_into`, the one copy of the single-sample `gemv` (`W·x`,
+  no biases). That helper is `#[inline(always)]` because a plain `#[inline]` was not
+  honoured and the extra call slowed the 4-6-2 benchmark. The biases are added
+  after it: `forward_into` and `forward_batch_into` add them in the same loop as the
+  activation (`add_bias_and_activate`, below), `pre_activations_into` on their own.
+  Each bias is added to the same product either way, so the trace stays
+  bit-identical to `feed_forward`. `extend_parameters` / `take_parameters` define
+  the flat order.
 - **`NetworkData` / `LayerData` are the single validation funnel.** They are the
   serde form of a network (`{"layers": [{"activation", "weights", "biases"}]}`).
   `NeuralNetwork` is `#[serde(into = "NetworkData", try_from = "NetworkData")]`, and
@@ -103,6 +107,14 @@ listed in that `pub use`.
   is `ActivationFunction::apply`), the frozen file codes, and the public `softmax`
   and `argmax` helpers. Softmax is deliberately not a variant: it needs the whole
   layer, and the file format stores one per-neuron function code per layer.
+  `add_bias_and_activate` is the forward passes' hot loop. It takes an iterator of
+  columns (one for `forward_into`, one per sample for `forward_batch_into`) and
+  matches the variant once per call, so once per layer on both paths, with no
+  wildcard arm so a new variant does not compile until it is handled; each arm runs
+  a loop monomorphized for that function over every column. Adding the bias in the
+  same loop is deliberate: a separate bias pass followed by the (two-lane vectorized)
+  sigmoid loop made the 4-6-2 benchmark 31% slower, most likely through failed
+  store-to-load forwarding on layers narrower than 8 neurons.
 - `src/init.rs`: `Init` (`#[non_exhaustive]`), the weight ranges behind
   `NeuralNetwork::new_with_init`. `Layer::random` draws from them; `Init::default()`
   is the `[-1, 1)` that `new` and `new_with_rng` have always used, and their output

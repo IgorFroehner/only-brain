@@ -69,6 +69,14 @@ names.
   removed in a later release.
 - Deprecated `NeuralNetwork::get_weight` and `NeuralNetwork::get_bias` in favour of
   `weight` and `bias`. They still work. Migration: drop the `get_` prefix.
+- `feed_forward` and `feed_forward_batch` add the biases and apply the activation
+  function in one loop specialised for each function, instead of calling it through
+  a function pointer once per neuron. With sigmoid layers, `feed_forward` is 4%
+  faster on a 4-6-2 network, 5% on a 16-16-16-4 network and 3% on a 64-128-64-10
+  network, and `feed_forward_batch` is 18% faster on a 16-16-16-4 network and 13%
+  on a 64-128-64-10 network, for 256 inputs. A new benchmark group,
+  `feed_forward_by_activation`, runs the 16-16-16-4 network with each function:
+  every one is faster, from 3% for tanh and 4% for softplus to 11% for SiLU.
 
 ### Fixed
 

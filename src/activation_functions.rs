@@ -309,6 +309,53 @@ pub fn argmax<const N: usize>(values: &[f64; N]) -> usize {
     best.unwrap_or(0)
 }
 
+/// Adds `biases` to every column, value by value, and applies `activation` to each
+/// sum, in place and in one pass. A column is one layer's values for one sample:
+/// `forward_into` passes a single column, `forward_batch_into` one per sample.
+///
+/// The variant is matched once per call, so once per layer on both paths, and each
+/// arm runs its own monomorphized loop over every column, so the function is inlined
+/// into the loop instead of being called through a pointer once per value. Adding the
+/// bias in the same loop keeps every value in a register between the two steps. The
+/// match has no wildcard arm on purpose: a new variant does not compile until it is
+/// handled here.
+///
+/// # Panics
+///
+/// Panics if a column's length differs from the number of biases.
+pub(crate) fn add_bias_and_activate<'a>(
+    activation: ActivationFunction,
+    biases: &[f64],
+    columns: impl IntoIterator<Item = &'a mut [f64]>,
+) {
+    #[inline(always)]
+    fn each<'a>(
+        biases: &[f64],
+        columns: impl IntoIterator<Item = &'a mut [f64]>,
+        function: impl Fn(f64) -> f64,
+    ) {
+        for column in columns {
+            // `zip` would silently skip the extra values of a longer column.
+            assert_eq!(column.len(), biases.len(), "a column must hold one value per bias");
+            for (value, bias) in column.iter_mut().zip(biases) {
+                *value = function(*value + bias);
+            }
+        }
+    }
+
+    match activation {
+        ActivationFunction::Sigmoid => each(biases, columns, sigmoid),
+        ActivationFunction::Tanh => each(biases, columns, tanh),
+        ActivationFunction::ReLU => each(biases, columns, relu),
+        ActivationFunction::BinaryStep => each(biases, columns, binary_step),
+        ActivationFunction::Identity => each(biases, columns, identity),
+        ActivationFunction::LeakyReLU => each(biases, columns, leaky_relu),
+        ActivationFunction::ELU => each(biases, columns, elu),
+        ActivationFunction::Softplus => each(biases, columns, softplus),
+        ActivationFunction::SiLU => each(biases, columns, silu),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -414,6 +461,39 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// `add_bias_and_activate` has its own match, so it must agree bit for bit with
+    /// `apply` for every variant, including the ones whose arm does little
+    /// (`Identity`) or branches (`BinaryStep`), and on every column it is given. The
+    /// odd length leaves a remainder after any vectorized part of the loop.
+    #[test]
+    fn add_bias_and_activate_matches_apply_for_every_variant_and_column() {
+        let first = [-2.0, -0.5, -0.0, 0.0, 0.5, 2.0, 40.0, -40.0, 0.25, -0.25, 1e-3];
+        let second = first.map(|x| -1.5 * x);
+        let biases = [0.5, 0.0, 0.0, -0.0, -0.5, -2.5, 1.0, 0.0, -0.25, 0.25, -1e-3];
+
+        for variant in ActivationFunction::ALL {
+            let mut columns = [first, second];
+            add_bias_and_activate(variant, &biases, columns.iter_mut().map(|column| column.as_mut_slice()));
+
+            for (column, inputs) in columns.iter().zip([first, second]) {
+                for ((actual, x), bias) in column.iter().zip(inputs).zip(biases) {
+                    assert_eq!(
+                        actual.to_bits(),
+                        variant.apply(x + bias).to_bits(),
+                        "{variant:?} at {x} + {bias}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "a column must hold one value per bias")]
+    fn add_bias_and_activate_rejects_a_column_longer_than_the_biases() {
+        let mut values = [0.0; 3];
+        add_bias_and_activate(ActivationFunction::Identity, &[1.0, 2.0], [values.as_mut_slice()]);
     }
 
     #[test]

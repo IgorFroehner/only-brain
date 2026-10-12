@@ -4,7 +4,8 @@
 //! genetic algorithm, so they are measured across the small shapes such networks
 //! actually have, plus one larger shape to show how the costs scale.
 //! `feed_forward_batch` is measured against a loop of `feed_forward` calls over the
-//! same inputs, which is what it replaces.
+//! same inputs, which is what it replaces. `feed_forward_by_activation` runs one
+//! shape with each activation function.
 //!
 //! Run with `cargo bench`, or `cargo bench -- feed_forward` for one group.
 
@@ -13,7 +14,7 @@ use rand::rngs::StdRng;
 use rand::SeedableRng;
 use std::hint::black_box;
 
-use only_brain::{read_model, write_model, NeuralNetwork};
+use only_brain::{read_model, write_model, ActivationFunction, NeuralNetwork};
 
 /// A deterministic network, so every run measures the same numbers.
 fn network<const IN: usize, const OUT: usize>(hidden: &[usize]) -> NeuralNetwork<IN, OUT> {
@@ -42,6 +43,24 @@ fn bench_feed_forward(c: &mut Criterion) {
         let inputs = [0.1; 64];
         b.iter(|| medium.feed_forward(black_box(&inputs)))
     });
+
+    group.finish();
+}
+
+/// The same small network with every layer set to each activation function in turn.
+/// The `feed_forward` group only runs the default sigmoid, whose cost is mostly `exp`;
+/// this one shows what the activation loop costs for the cheaper functions.
+fn bench_feed_forward_by_activation(c: &mut Criterion) {
+    let mut group = c.benchmark_group("feed_forward_by_activation");
+    let inputs = [0.1; 16];
+
+    for activation in ActivationFunction::ALL {
+        let mut small = network::<16, 4>(&[16, 16]);
+        small.set_activation_function(activation);
+        group.bench_function(BenchmarkId::new(format!("{activation:?}"), "16-16-16-4"), |b| {
+            b.iter(|| small.feed_forward(black_box(&inputs)))
+        });
+    }
 
     group.finish();
 }
@@ -130,6 +149,7 @@ fn bench_model_io(c: &mut Criterion) {
 criterion_group!(
     benches,
     bench_feed_forward,
+    bench_feed_forward_by_activation,
     bench_feed_forward_batch,
     bench_parameters,
     bench_model_io

@@ -3,7 +3,7 @@ use nalgebra::{DMatrix, DMatrixView, DMatrixViewMut, DVector, DVectorView, DVect
 use rand::distr::Uniform;
 use rand::Rng;
 
-use crate::activation_functions::{get_activation_function, ActivationFunction};
+use crate::activation_functions::{add_bias_and_activate, ActivationFunction};
 
 /// One layer of neurons: a weight matrix with one row per neuron and one column per
 /// input, a bias per neuron, and the activation applied to every neuron.
@@ -67,10 +67,8 @@ impl Layer {
     /// `inputs` must hold exactly [`inputs()`](Self::inputs) values and `outputs`
     /// exactly [`size()`](Self::size) values.
     pub fn forward_into(&self, inputs: &[f64], outputs: &mut [f64]) {
-        let mut outputs = self.weighted_sums_into(inputs, outputs);
-
-        let activation = get_activation_function(self.activation);
-        outputs.apply(|x| *x = activation(*x));
+        self.weighted_inputs_into(inputs, outputs);
+        add_bias_and_activate(self.activation, self.biases.as_slice(), [outputs]);
     }
 
     /// Computes this layer's outputs for every column of `inputs` into the matching
@@ -80,12 +78,12 @@ impl Layer {
     /// [`size()`](Self::size) rows, with one column per sample in both.
     pub fn forward_batch_into(&self, inputs: DMatrixView<'_, f64>, mut outputs: DMatrixViewMut<'_, f64>) {
         outputs.gemm(1.0, &self.weights, &inputs, 0.0);
-        for mut column in outputs.column_iter_mut() {
-            column += &self.biases;
-        }
 
-        let activation = get_activation_function(self.activation);
-        outputs.apply(|x| *x = activation(*x));
+        // Each column of the view is contiguous even though the view is not (it is the
+        // top rows of a taller matrix), so it can be handed over as a slice. One call
+        // covers every column, so the activation is matched once per layer.
+        let columns = outputs.column_iter_mut().map(|column| column.data.into_slice_mut());
+        add_bias_and_activate(self.activation, self.biases.as_slice(), columns);
     }
 
     /// The number of neurons.
@@ -106,21 +104,25 @@ impl Layer {
     /// [`activation()`](Self::activation) to each one gives what
     /// [`forward_into`](Self::forward_into) computes.
     pub fn pre_activations_into(&self, inputs: &[f64], pre_activations: &mut [f64]) {
-        self.weighted_sums_into(inputs, pre_activations);
+        self.weighted_inputs_into(inputs, pre_activations);
+        for (sum, bias) in pre_activations.iter_mut().zip(self.biases.iter()) {
+            *sum += bias;
+        }
     }
 
-    /// Writes `W·x + b` into `sums` and returns it as a vector view, so
-    /// [`forward_into`](Self::forward_into) can apply the activation in place. This is
-    /// the only place the single-sample weighted sums are computed. It is forced inline
-    /// so `forward_into`, the per-sample hot path, compiles to the same code as before.
+    /// Writes `W·x`, without the biases, into `sums`. This is the only place the
+    /// single-sample product is computed. [`forward_into`](Self::forward_into) adds the
+    /// biases in the same loop as the activation, and
+    /// [`pre_activations_into`](Self::pre_activations_into) adds them on their own; both
+    /// add each bias to the same product, so the trace stays bit-identical to
+    /// `feed_forward`. It is forced inline so `forward_into`, the per-sample hot path,
+    /// keeps the product and the activation loop in one function.
     #[inline(always)]
-    fn weighted_sums_into<'a>(&self, inputs: &[f64], sums: &'a mut [f64]) -> DVectorViewMut<'a, f64> {
+    fn weighted_inputs_into(&self, inputs: &[f64], sums: &mut [f64]) {
         let inputs = DVectorView::from_slice(inputs, self.inputs());
         let mut sums = DVectorViewMut::from_slice(sums, self.size());
 
         sums.gemv(1.0, &self.weights, &inputs, 0.0);
-        sums += &self.biases;
-        sums
     }
 
     pub fn activation(&self) -> ActivationFunction {
@@ -220,5 +222,68 @@ impl fmt::Display for Layer {
             writeln!(f, "{:0.2}", bias)?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ROWS: [[f64; 2]; 3] = [[0.5, -0.25], [-1.0, 2.0], [0.0, 0.75]];
+    const BIASES: [f64; 3] = [0.1, -0.3, 0.0];
+    const SAMPLES: [[f64; 2]; 4] = [[1.0, 2.0], [-1.0, 0.5], [0.0, 0.0], [3.0, -2.0]];
+
+    fn layer(activation: ActivationFunction) -> Layer {
+        let rows: Vec<Vec<f64>> = ROWS.iter().map(|row| row.to_vec()).collect();
+        Layer::from_parts(&rows, &BIASES, activation, 2).expect("the parts form a layer")
+    }
+
+    /// What the layer outputs for one sample, computed the slow way through `apply`.
+    fn expected(activation: ActivationFunction, sample: [f64; 2]) -> Vec<f64> {
+        ROWS.iter()
+            .zip(BIASES)
+            .map(|(row, bias)| activation.apply(row[0] * sample[0] + row[1] * sample[1] + bias))
+            .collect()
+    }
+
+    fn assert_all_close(actual: &[f64], expected: &[f64]) {
+        assert_eq!(actual.len(), expected.len());
+        for (a, e) in actual.iter().zip(expected) {
+            assert!((a - e).abs() < 1e-12, "expected {expected:?}, got {actual:?}");
+        }
+    }
+
+    #[test]
+    fn forward_into_applies_every_activation_function_to_each_neuron() {
+        for activation in ActivationFunction::ALL {
+            let layer = layer(activation);
+
+            for sample in SAMPLES {
+                let mut outputs = [f64::NAN; 3];
+                layer.forward_into(&sample, &mut outputs);
+
+                assert_all_close(&outputs, &expected(activation, sample));
+            }
+        }
+    }
+
+    /// The outputs are the top rows of a taller matrix, as in `feed_forward_batch`, so
+    /// the columns are not contiguous with each other and the rows below must not be
+    /// touched.
+    #[test]
+    fn forward_batch_into_applies_every_activation_function_to_each_column() {
+        for activation in ActivationFunction::ALL {
+            let layer = layer(activation);
+            let inputs = DMatrix::from_fn(2, SAMPLES.len(), |input, sample| SAMPLES[sample][input]);
+            let mut outputs = DMatrix::from_element(5, SAMPLES.len(), f64::NAN);
+
+            layer.forward_batch_into(inputs.rows(0, 2), outputs.rows_mut(0, 3));
+
+            for (column, sample) in outputs.column_iter().zip(SAMPLES) {
+                let column: Vec<f64> = column.iter().copied().collect();
+                assert_all_close(&column[..3], &expected(activation, sample));
+                assert!(column[3..].iter().all(|value| value.is_nan()), "{activation:?} wrote past its rows");
+            }
+        }
     }
 }
