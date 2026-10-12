@@ -80,7 +80,10 @@ helper function added to that module must also be listed in that `pub use`.
   has at most 16 neurons, which a benchmark showed beats a larger stack buffer).
   `forward_batch_into` is its `gemm` counterpart behind `feed_forward_batch`, one
   column per sample. `pre_activations_into` computes `W·x + b` without the
-  activation, for `feed_forward_trace`. `extend_parameters` /
+  activation, for `feed_forward_trace`. Both it and `forward_into` go through the
+  private `weighted_sums_into`, the one copy of the single-sample `W·x + b`. That
+  helper is `#[inline(always)]` because a plain `#[inline]` was not honoured and the
+  extra call slowed the 4-6-2 benchmark. `extend_parameters` /
   `take_parameters` define the flat order.
 - **`NetworkData` / `LayerData` are the single validation funnel.** They are the
   serde form of a network (`{"layers": [{"activation", "weights", "biases"}]}`).

@@ -67,11 +67,7 @@ impl Layer {
     /// `inputs` must hold exactly [`inputs()`](Self::inputs) values and `outputs`
     /// exactly [`size()`](Self::size) values.
     pub fn forward_into(&self, inputs: &[f64], outputs: &mut [f64]) {
-        let inputs = DVectorView::from_slice(inputs, self.inputs());
-        let mut outputs = DVectorViewMut::from_slice(outputs, self.size());
-
-        outputs.gemv(1.0, &self.weights, &inputs, 0.0);
-        outputs += &self.biases;
+        let mut outputs = self.weighted_sums_into(inputs, outputs);
 
         let activation = get_activation_function(self.activation);
         outputs.apply(|x| *x = activation(*x));
@@ -110,11 +106,21 @@ impl Layer {
     /// [`activation()`](Self::activation) to each one gives what
     /// [`forward_into`](Self::forward_into) computes.
     pub fn pre_activations_into(&self, inputs: &[f64], pre_activations: &mut [f64]) {
-        let inputs = DVectorView::from_slice(inputs, self.inputs());
-        let mut pre_activations = DVectorViewMut::from_slice(pre_activations, self.size());
+        self.weighted_sums_into(inputs, pre_activations);
+    }
 
-        pre_activations.gemv(1.0, &self.weights, &inputs, 0.0);
-        pre_activations += &self.biases;
+    /// Writes `W·x + b` into `sums` and returns it as a vector view, so
+    /// [`forward_into`](Self::forward_into) can apply the activation in place. This is
+    /// the only place the single-sample weighted sums are computed. It is forced inline
+    /// so `forward_into`, the per-sample hot path, compiles to the same code as before.
+    #[inline(always)]
+    fn weighted_sums_into<'a>(&self, inputs: &[f64], sums: &'a mut [f64]) -> DVectorViewMut<'a, f64> {
+        let inputs = DVectorView::from_slice(inputs, self.inputs());
+        let mut sums = DVectorViewMut::from_slice(sums, self.size());
+
+        sums.gemv(1.0, &self.weights, &inputs, 0.0);
+        sums += &self.biases;
+        sums
     }
 
     pub fn activation(&self) -> ActivationFunction {
