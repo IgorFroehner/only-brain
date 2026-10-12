@@ -102,6 +102,21 @@ impl Layer {
         self.weights.ncols()
     }
 
+    /// Computes this layer's weighted sums `W·x + b`, before the activation, into
+    /// `pre_activations`, without allocating.
+    ///
+    /// `inputs` must hold exactly [`inputs()`](Self::inputs) values and
+    /// `pre_activations` exactly [`size()`](Self::size) values. Applying
+    /// [`activation()`](Self::activation) to each one gives what
+    /// [`forward_into`](Self::forward_into) computes.
+    pub fn pre_activations_into(&self, inputs: &[f64], pre_activations: &mut [f64]) {
+        let inputs = DVectorView::from_slice(inputs, self.inputs());
+        let mut pre_activations = DVectorViewMut::from_slice(pre_activations, self.size());
+
+        pre_activations.gemv(1.0, &self.weights, &inputs, 0.0);
+        pre_activations += &self.biases;
+    }
+
     pub fn activation(&self) -> ActivationFunction {
         self.activation
     }
