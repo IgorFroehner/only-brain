@@ -9,10 +9,14 @@ use serde::{Deserialize, Serialize};
 /// [`Identity`](Self::Identity) for unbounded outputs.
 ///
 /// [`LeakyReLU`](Self::LeakyReLU), [`ELU`](Self::ELU), [`Softplus`](Self::Softplus)
-/// and [`SiLU`](Self::SiLU) are smoother or never-flat alternatives to
-/// [`ReLU`](Self::ReLU) for hidden layers: their slope for negative inputs is not
-/// zero, so neurons pushed below zero can still recover. Their parameters are fixed,
-/// because the model file stores a single byte per layer for its activation.
+/// and [`SiLU`](Self::SiLU) are alternatives to [`ReLU`](Self::ReLU) for hidden
+/// layers whose slope is not zero just below zero, so a neuron pushed slightly
+/// negative still gets a gradient. Only [`LeakyReLU`](Self::LeakyReLU) keeps a
+/// constant slope for every negative input; the slopes of [`ELU`](Self::ELU),
+/// [`Softplus`](Self::Softplus) and [`SiLU`](Self::SiLU) fade to zero for very
+/// negative inputs, and [`SiLU`](Self::SiLU)'s is negative below about `-1.28`. Their
+/// parameters are fixed, because the model file stores a single byte per layer for
+/// its activation.
 ///
 /// # Why softmax is not an activation
 ///
@@ -149,7 +153,8 @@ impl ActivationFunction {
             ActivationFunction::Softplus => sigmoid(x),
             ActivationFunction::SiLU => {
                 let s = sigmoid(x);
-                s * (1.0 + x * (1.0 - s))
+                // The limits, 0 and 1, which `x * (1 - s)` would turn into NaN.
+                if x.is_infinite() { s } else { s * (1.0 + x * (1.0 - s)) }
             }
         }
     }
@@ -217,7 +222,8 @@ pub(crate) fn softplus(x: f64) -> f64 {
 }
 
 pub(crate) fn silu(x: f64) -> f64 {
-    x * sigmoid(x)
+    // `-inf * 0` is NaN, but the limit at -infinity is 0.
+    if x == f64::NEG_INFINITY { 0.0 } else { x * sigmoid(x) }
 }
 
 /// Returns the plain function behind an [`ActivationFunction`].
@@ -244,6 +250,10 @@ pub(crate) fn get_activation_function(func: ActivationFunction) -> fn(f64) -> f6
 /// largest value is subtracted from every value before exponentiating, which does not
 /// change the result but keeps `e^x` from overflowing for large outputs.
 ///
+/// Every value must be finite or `-∞` (which gets probability 0). If any value is NaN
+/// or `+∞`, or every value is `-∞`, every output is NaN. An empty array (`N = 0`)
+/// returns an empty array.
+///
 /// # Example
 ///
 /// ```
@@ -264,10 +274,11 @@ pub fn softmax<const N: usize>(values: &[f64; N]) -> [f64; N] {
 }
 
 /// The index of the largest value, such as the class a classifier's outputs or
-/// [`softmax`] probabilities pick. On a tie, the first of the largest values wins.
+/// [`softmax`] probabilities pick. On a tie, the first of the largest values wins;
+/// `-0.0` and `0.0` are equal, so they tie.
 ///
-/// Values are ordered by [`f64::total_cmp`], so the result is defined even when an
-/// output is NaN.
+/// NaN values are skipped, as if they were not there. If every value is NaN, the
+/// result is 0.
 ///
 /// # Panics
 ///
@@ -280,16 +291,22 @@ pub fn softmax<const N: usize>(values: &[f64; N]) -> [f64; N] {
 ///
 /// assert_eq!(argmax(&[0.1, 0.7, 0.2]), 1);
 /// assert_eq!(argmax(&[0.5, 0.5]), 0);
+/// assert_eq!(argmax(&[f64::NAN, 0.3]), 1);
 /// ```
 pub fn argmax<const N: usize>(values: &[f64; N]) -> usize {
     assert!(N > 0, "argmax of an empty array");
-    let mut best = 0;
-    for (index, value) in values.iter().enumerate().skip(1) {
-        if value.total_cmp(&values[best]).is_gt() {
-            best = index;
+    let mut best: Option<usize> = None;
+    for (index, &value) in values.iter().enumerate() {
+        if value.is_nan() {
+            continue;
+        }
+        // `<=` keeps the first of equal values, and treats -0.0 and 0.0 as equal.
+        match best {
+            Some(best) if value <= values[best] => {}
+            _ => best = Some(index),
         }
     }
-    best
+    best.unwrap_or(0)
 }
 
 #[cfg(test)]
@@ -472,6 +489,25 @@ mod tests {
         }
     }
 
+    /// SiLU's `x · sigmoid(x)` used to give `-inf * 0`, NaN, at `-∞`.
+    #[test]
+    fn no_function_or_derivative_is_nan_at_infinity() {
+        for function in ActivationFunction::ALL {
+            for x in [f64::INFINITY, f64::NEG_INFINITY] {
+                assert!(!function.apply(x).is_nan(), "{function:?}.apply({x})");
+                assert!(!function.derivative(x).is_nan(), "{function:?}.derivative({x})");
+            }
+        }
+    }
+
+    #[test]
+    fn silu_reaches_its_limits_at_infinity() {
+        assert_eq!(silu(f64::INFINITY), f64::INFINITY);
+        assert_eq!(silu(f64::NEG_INFINITY), 0.0);
+        assert_eq!(ActivationFunction::SiLU.derivative(f64::INFINITY), 1.0);
+        assert_eq!(ActivationFunction::SiLU.derivative(f64::NEG_INFINITY), 0.0);
+    }
+
     #[test]
     fn silu_is_x_times_sigmoid() {
         assert_close(silu(0.0), 0.0);
@@ -523,6 +559,31 @@ mod tests {
         assert_eq!(argmax(&[1.0]), 0);
         assert_eq!(argmax(&[-2.0, 5.0, 5.0, 1.0]), 1);
         assert_eq!(argmax(&[f64::NEG_INFINITY, -1e300]), 1);
+        assert_eq!(argmax(&[f64::INFINITY, 1.0]), 0);
+    }
+
+    /// Under `total_cmp`, `0.0` would beat `-0.0` and a positive NaN would beat
+    /// every number.
+    #[test]
+    fn argmax_treats_signed_zeros_as_tied_and_skips_nan() {
+        assert_eq!(argmax(&[-0.0, 0.0]), 0);
+        assert_eq!(argmax(&[0.0, -0.0]), 0);
+        assert_eq!(argmax(&[f64::NAN, -1.0, 2.0, f64::NAN]), 2);
+        assert_eq!(argmax(&[-f64::NAN, -1.0]), 1);
+        assert_eq!(argmax(&[f64::NAN, f64::NAN]), 0);
+    }
+
+    #[test]
+    fn softmax_of_non_finite_values_is_nan_except_for_some_negative_infinities() {
+        for values in [
+            [f64::NAN, 1.0],
+            [f64::INFINITY, 1.0],
+            [f64::NEG_INFINITY, f64::NEG_INFINITY],
+        ] {
+            assert!(softmax(&values).iter().all(|p| p.is_nan()), "{values:?}");
+        }
+        assert_eq!(softmax(&[f64::NEG_INFINITY, 1.0]), [0.0, 1.0]);
+        assert_eq!(softmax(&[]), [0.0; 0]);
     }
 
     #[test]
