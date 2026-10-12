@@ -29,6 +29,9 @@ jobs:
       - run: cargo test --doc
       # The neuroevolution example is the end-to-end check of the flat parameter view.
       - run: cargo run --example xor_evolution
+      # The backpropagation example is the end-to-end check of the layer-by-layer view,
+      # the trace and the activation derivatives. It asserts a test accuracy.
+      - run: cargo run --example iris_backprop
 
   clippy:
     name: Clippy
