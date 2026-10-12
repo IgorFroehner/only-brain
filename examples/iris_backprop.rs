@@ -15,7 +15,7 @@
 use std::error::Error;
 use std::fs;
 
-use only_brain::{ActivationFunction, NeuralNetwork};
+use only_brain::{argmax, softmax, ActivationFunction, NeuralNetwork};
 use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
 use rand::SeedableRng;
@@ -76,23 +76,17 @@ fn standardize(train: &mut [Sample], test: &mut [Sample]) {
     }
 }
 
-fn softmax(logits: &[f64]) -> Vec<f64> {
-    let max = logits.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-    let exps: Vec<f64> = logits.iter().map(|&logit| (logit - max).exp()).collect();
-    let total: f64 = exps.iter().sum();
-    exps.iter().map(|e| e / total).collect()
-}
-
 /// One step of stochastic gradient descent on one sample. Returns the sample's
 /// cross-entropy loss before the step.
 fn train_step(nn: &mut Classifier, sample: &Sample, learning_rate: f64) -> f64 {
     let trace = nn.feed_forward_trace(&sample.features);
-    let probabilities = softmax(trace.output());
+    let logits: &[f64; 3] = trace.output().try_into().expect("there are three classes");
+    let probabilities = softmax(logits);
     let loss = -probabilities[sample.species].ln();
 
     // The gradient of softmax + cross-entropy with respect to the logits, which are
     // the output layer's outputs: the probabilities minus the one-hot target.
-    let mut output_gradient = probabilities;
+    let mut output_gradient = probabilities.to_vec();
     output_gradient[sample.species] -= 1.0;
 
     // Walk back from the output layer to layer 1. `output_gradient` holds the loss's
@@ -138,19 +132,13 @@ fn train_step(nn: &mut Classifier, sample: &Sample, learning_rate: f64) -> f64 {
     loss
 }
 
-fn predict(logits: &[f64; 3]) -> usize {
-    (0..logits.len())
-        .max_by(|&a, &b| logits[a].total_cmp(&logits[b]))
-        .expect("there are three classes")
-}
-
 fn accuracy(nn: &Classifier, samples: &[Sample]) -> f64 {
     let inputs: Vec<[f64; 4]> = samples.iter().map(|s| s.features).collect();
     let correct = nn
         .feed_forward_batch(&inputs)
         .iter()
         .zip(samples)
-        .filter(|(logits, sample)| predict(logits) == sample.species)
+        .filter(|(logits, sample)| argmax(logits) == sample.species)
         .count();
 
     correct as f64 / samples.len() as f64

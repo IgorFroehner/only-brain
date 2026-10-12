@@ -13,6 +13,29 @@ use serde::{Deserialize, Serialize};
 /// [`ReLU`](Self::ReLU) for hidden layers: their slope for negative inputs is not
 /// zero, so neurons pushed below zero can still recover. Their parameters are fixed,
 /// because the model file stores a single byte per layer for its activation.
+///
+/// # Why softmax is not an activation
+///
+/// Softmax turns a whole layer into probabilities, `e^x_i / Σ_j e^x_j`, so each
+/// output depends on every neuron of the layer, not just its own weighted sum. An
+/// `ActivationFunction` is applied to each neuron on its own ([`apply`](Self::apply)
+/// takes one `f64`), so a softmax variant could not honour that contract, and its
+/// [`derivative`](Self::derivative) would be a matrix rather than a number. Use an
+/// [`Identity`](Self::Identity) output layer and apply [`softmax`](crate::softmax)
+/// to the network's outputs instead, and [`argmax`](crate::argmax) to pick a class:
+///
+/// ```
+/// use only_brain::{argmax, softmax, ActivationFunction, NeuralNetwork};
+///
+/// let mut classifier = NeuralNetwork::<4, 3>::new(&[8]);
+/// classifier.set_activation_function(ActivationFunction::ReLU);
+/// classifier.set_output_activation(ActivationFunction::Identity);
+///
+/// let probabilities = softmax(&classifier.feed_forward(&[5.1, 3.5, 1.4, 0.2]));
+/// assert!((probabilities.iter().sum::<f64>() - 1.0).abs() < 1e-12);
+/// let class = argmax(&probabilities);
+/// assert!(class < 3);
+/// ```
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum ActivationFunction {
@@ -212,6 +235,63 @@ pub(crate) fn get_activation_function(func: ActivationFunction) -> fn(f64) -> f6
     }
 }
 
+/// Turns a layer's outputs into probabilities that sum to 1: `e^x_i / Σ_j e^x_j`.
+///
+/// This is how to get a softmax output layer: give the network an
+/// [`Identity`](ActivationFunction::Identity) output layer and apply `softmax` to what
+/// [`feed_forward`](crate::NeuralNetwork::feed_forward) returns (see [why softmax is
+/// not an activation](ActivationFunction#why-softmax-is-not-an-activation)). The
+/// largest value is subtracted from every value before exponentiating, which does not
+/// change the result but keeps `e^x` from overflowing for large outputs.
+///
+/// # Example
+///
+/// ```
+/// use only_brain::softmax;
+///
+/// let probabilities = softmax(&[1.0, 2.0, 3.0]);
+/// assert!((probabilities.iter().sum::<f64>() - 1.0).abs() < 1e-12);
+/// assert!(probabilities[0] < probabilities[1] && probabilities[1] < probabilities[2]);
+///
+/// // Large outputs do not overflow.
+/// assert_eq!(softmax(&[1000.0, 1000.0]), [0.5, 0.5]);
+/// ```
+pub fn softmax<const N: usize>(values: &[f64; N]) -> [f64; N] {
+    let max = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let exps = values.map(|value| (value - max).exp());
+    let total: f64 = exps.iter().sum();
+    exps.map(|exp| exp / total)
+}
+
+/// The index of the largest value, such as the class a classifier's outputs or
+/// [`softmax`] probabilities pick. On a tie, the first of the largest values wins.
+///
+/// Values are ordered by [`f64::total_cmp`], so the result is defined even when an
+/// output is NaN.
+///
+/// # Panics
+///
+/// Panics if `N` is 0.
+///
+/// # Example
+///
+/// ```
+/// use only_brain::argmax;
+///
+/// assert_eq!(argmax(&[0.1, 0.7, 0.2]), 1);
+/// assert_eq!(argmax(&[0.5, 0.5]), 0);
+/// ```
+pub fn argmax<const N: usize>(values: &[f64; N]) -> usize {
+    assert!(N > 0, "argmax of an empty array");
+    let mut best = 0;
+    for (index, value) in values.iter().enumerate().skip(1) {
+        if value.total_cmp(&values[best]).is_gt() {
+            best = index;
+        }
+    }
+    best
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -400,6 +480,55 @@ mod tests {
         }
         assert_eq!(silu(1000.0), 1000.0);
         assert_eq!(silu(-1000.0), 0.0);
+    }
+
+    #[test]
+    fn softmax_sums_to_one_and_keeps_the_order() {
+        let probabilities = softmax(&[1.0, 3.0, 2.0, -1.0]);
+        assert_close(probabilities.iter().sum(), 1.0);
+        assert_eq!(argmax(&probabilities), 1);
+        assert!(probabilities[2] > probabilities[0] && probabilities[0] > probabilities[3]);
+    }
+
+    #[test]
+    fn softmax_matches_the_naive_formula() {
+        let values = [0.5, -1.25, 2.0];
+        let total: f64 = values.iter().map(|v: &f64| v.exp()).sum();
+        let probabilities = softmax(&values);
+        for (probability, value) in probabilities.iter().zip(values) {
+            assert_close(*probability, value.exp() / total);
+        }
+    }
+
+    /// Without subtracting the max, `e^1000` is infinite and every output NaN.
+    #[test]
+    fn softmax_does_not_overflow_on_large_values() {
+        let probabilities = softmax(&[1000.0, 999.0, -1000.0]);
+        assert!(probabilities.iter().all(|p| p.is_finite()));
+        assert_close(probabilities.iter().sum(), 1.0);
+        assert_close(probabilities[0] / probabilities[1], 1f64.exp());
+        assert_eq!(probabilities[2], 0.0);
+    }
+
+    #[test]
+    fn softmax_is_unchanged_by_shifting_every_value() {
+        let shifted = softmax(&[101.0, 102.0, 103.0]);
+        for (a, b) in softmax(&[1.0, 2.0, 3.0]).iter().zip(shifted) {
+            assert_close(*a, b);
+        }
+    }
+
+    #[test]
+    fn argmax_picks_the_first_of_tied_maxima() {
+        assert_eq!(argmax(&[1.0]), 0);
+        assert_eq!(argmax(&[-2.0, 5.0, 5.0, 1.0]), 1);
+        assert_eq!(argmax(&[f64::NEG_INFINITY, -1e300]), 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "argmax of an empty array")]
+    fn argmax_of_an_empty_array_panics() {
+        argmax(&[]);
     }
 
     #[test]
