@@ -121,6 +121,22 @@ fn bench_parameters(c: &mut Criterion) {
         b.iter(|| NeuralNetwork::<16, 4>::from_parameters(&[16, 16], black_box(&genome)))
     });
 
+    // Mutating a network: out through the flat view and back, against in place. The
+    // mutation is a cheap negation so the copies are what is measured.
+    group.bench_function("round_trip_mutation/16-16-16-4", |b| {
+        let mut nn = small.clone();
+        b.iter(|| {
+            let mut genome = black_box(&nn).parameters();
+            genome.iter_mut().for_each(|parameter| *parameter = -*parameter);
+            nn.set_parameters(&genome);
+        })
+    });
+
+    group.bench_function("map_parameters/16-16-16-4", |b| {
+        let mut nn = small.clone();
+        b.iter(|| black_box(&mut nn).map_parameters(|parameter| -parameter))
+    });
+
     group.finish();
 }
 

@@ -187,6 +187,15 @@ impl Layer {
         parameters.extend(self.biases.iter());
     }
 
+    /// Calls `f` on each of this layer's parameters in place, in the order of
+    /// [`Layer::extend_parameters`].
+    pub fn for_each_parameter_mut(&mut self, f: &mut impl FnMut(&mut f64)) {
+        for mut row in self.weights.row_iter_mut() {
+            row.iter_mut().for_each(&mut *f);
+        }
+        self.biases.iter_mut().for_each(f);
+    }
+
     /// Reads this layer's parameters, in the order of [`Layer::extend_parameters`], from
     /// the front of `parameters`, and returns what is left.
     pub fn take_parameters<'a>(&mut self, parameters: &'a [f64]) -> &'a [f64] {

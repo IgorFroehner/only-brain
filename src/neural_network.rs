@@ -51,7 +51,9 @@ use serde::{Deserialize, Serialize};
 /// rather than on layers. [`parameters`](Self::parameters),
 /// [`set_parameters`](Self::set_parameters) and
 /// [`from_parameters`](Self::from_parameters) convert between a network and such a
-/// list, in an order that is documented and stable across versions:
+/// list, and [`for_each_parameter_mut`](Self::for_each_parameter_mut) and
+/// [`map_parameters`](Self::map_parameters) change the parameters in place, all in an
+/// order that is documented and stable across versions:
 ///
 /// - layer by layer, from layer 1 to the output layer;
 /// - within a layer, every weight first, row by row (all the weights of neuron 0, then
@@ -457,6 +459,70 @@ impl<const IN: usize, const OUT: usize> NeuralNetwork<IN, OUT> {
         for layer in &mut self.layers {
             rest = layer.take_parameters(rest);
         }
+    }
+
+    /// Calls `f` on every weight and bias in place, in the order described in the
+    /// [flat parameter view](Self#flat-parameter-view). Activation functions are kept.
+    ///
+    /// This is the in-place counterpart of [`parameters`](Self::parameters) followed by
+    /// [`set_parameters`](Self::set_parameters): a genetic algorithm that keeps
+    /// networks rather than genomes can mutate a child without copying its parameters
+    /// out and back. [`map_parameters`](Self::map_parameters) does the same with a
+    /// function that returns the new value.
+    ///
+    /// # Example
+    ///
+    /// Gaussian mutation: each parameter has a one in five chance of being nudged by
+    /// normally distributed noise.
+    ///
+    /// ```
+    /// use only_brain::NeuralNetwork;
+    /// use rand::rngs::StdRng;
+    /// use rand::{Rng, SeedableRng};
+    /// use rand_distr::{Distribution, Normal};
+    ///
+    /// let mut rng = StdRng::seed_from_u64(7);
+    /// let parent = NeuralNetwork::<2, 1>::new_with_rng(&[3], &mut rng);
+    /// let noise = Normal::new(0.0, 0.4).unwrap();
+    ///
+    /// let mut child = parent.clone();
+    /// child.for_each_parameter_mut(|parameter| {
+    ///     if rng.random_bool(0.2) {
+    ///         *parameter += noise.sample(&mut rng);
+    ///     }
+    /// });
+    ///
+    /// assert_ne!(child, parent);
+    /// ```
+    pub fn for_each_parameter_mut(&mut self, mut f: impl FnMut(&mut f64)) {
+        for layer in &mut self.layers {
+            layer.for_each_parameter_mut(&mut f);
+        }
+    }
+
+    /// Replaces every weight and bias with `f` of its current value, in the order
+    /// described in the [flat parameter view](Self#flat-parameter-view). Activation
+    /// functions are kept.
+    ///
+    /// The same as [`for_each_parameter_mut`](Self::for_each_parameter_mut) with
+    /// `|parameter| *parameter = f(*parameter)`, and the same as mapping
+    /// [`parameters`](Self::parameters) and handing the result to
+    /// [`set_parameters`](Self::set_parameters), without the copies.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use only_brain::NeuralNetwork;
+    ///
+    /// let mut nn = NeuralNetwork::<2, 1>::from_parameters(&[], &[0.5, -3.0, 2.5]);
+    ///
+    /// // Keep every parameter within [-1, 1].
+    /// nn.map_parameters(|parameter| parameter.clamp(-1.0, 1.0));
+    ///
+    /// assert_eq!(nn.parameters(), vec![0.5, -1.0, 1.0]);
+    /// ```
+    pub fn map_parameters(&mut self, mut f: impl FnMut(f64) -> f64) {
+        self.for_each_parameter_mut(|parameter| *parameter = f(*parameter));
     }
 
     /// Sets every weight of the given layer, as one row per neuron of that layer
@@ -1352,6 +1418,72 @@ mod tests {
             &rebuilt.feed_forward(&[0.1, -0.2, 0.3]),
             &original.feed_forward(&[0.1, -0.2, 0.3]),
         );
+    }
+
+    #[test]
+    fn for_each_parameter_mut_visits_the_documented_order() {
+        let mut nn = numbered_network();
+        let mut visited = Vec::new();
+
+        nn.for_each_parameter_mut(|parameter| visited.push(*parameter));
+
+        assert_eq!(visited, nn.parameters());
+    }
+
+    #[test]
+    fn map_parameters_writes_the_documented_order() {
+        let mut nn = numbered_network();
+        let mut position = 0.0;
+
+        // Replace each parameter by its position, so a wrong order shows.
+        nn.map_parameters(|_| {
+            position += 1.0;
+            position * 10.0
+        });
+
+        assert_eq!(nn.parameters(), vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0]);
+        assert_eq!(nn.weight(1, 1, 0), 30.0);
+        assert_eq!(nn.bias(2, 0), 90.0);
+    }
+
+    #[test]
+    fn map_parameters_keeps_activation_functions() {
+        let mut nn = numbered_network();
+        nn.set_layer_activation(1, ActivationFunction::ReLU);
+        nn.set_output_activation(ActivationFunction::Tanh);
+
+        nn.map_parameters(|parameter| -parameter);
+
+        assert_eq!(nn.layer_activation(1), ActivationFunction::ReLU);
+        assert_eq!(nn.output_activation(), ActivationFunction::Tanh);
+    }
+
+    /// Gaussian mutation, the GA use case: the in-place call and the round trip through
+    /// the flat view draw the same noise and end with the same network.
+    #[test]
+    fn mutating_in_place_matches_the_round_trip_through_the_flat_view() {
+        use rand::{Rng, SeedableRng};
+        use rand_distr::{Distribution, Normal};
+        let parent = NeuralNetwork::<3, 2>::new_with_rng(&[4, 5], &mut rand::rngs::StdRng::seed_from_u64(7));
+        let noise = Normal::new(0.0, 0.4).unwrap();
+        let mutate = |parameter: &mut f64, rng: &mut rand::rngs::StdRng| {
+            if rng.random_bool(0.3) {
+                *parameter += noise.sample(rng);
+            }
+        };
+
+        let mut rng = rand::rngs::StdRng::seed_from_u64(11);
+        let mut genome = parent.parameters();
+        genome.iter_mut().for_each(|parameter| mutate(parameter, &mut rng));
+        let mut round_trip = parent.clone();
+        round_trip.set_parameters(&genome);
+
+        let mut rng = rand::rngs::StdRng::seed_from_u64(11);
+        let mut in_place = parent.clone();
+        in_place.for_each_parameter_mut(|parameter| mutate(parameter, &mut rng));
+
+        assert_ne!(in_place, parent);
+        assert_eq!(in_place, round_trip);
     }
 
     #[test]
