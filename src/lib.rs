@@ -72,7 +72,7 @@ mod bvector;
 pub use io::*;
 pub use neural_network::*;
 pub use perceptron::*;
-pub use activation_functions::*;
+pub use activation_functions::ActivationFunction;
 pub use bvector::*;
 
 

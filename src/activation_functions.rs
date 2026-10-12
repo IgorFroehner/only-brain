@@ -64,28 +64,28 @@ impl ActivationFunction {
     }
 }
 
-pub fn sigmoid(x: f64) -> f64 {
+pub(crate) fn sigmoid(x: f64) -> f64 {
     1. / (1. + (-x).exp())
 }
 
-pub fn tanh(x: f64) -> f64 {
+pub(crate) fn tanh(x: f64) -> f64 {
     x.tanh()
 }
 
-pub fn relu(x: f64) -> f64 {
+pub(crate) fn relu(x: f64) -> f64 {
     x.max(0.0)
 }
 
-pub fn binary_step(x: f64) -> f64 {
+pub(crate) fn binary_step(x: f64) -> f64 {
     if x >= 0.0 { 1.0 } else { 0.0 }
 }
 
-pub fn identity(x: f64) -> f64 {
+pub(crate) fn identity(x: f64) -> f64 {
     x
 }
 
 /// Returns the plain function behind an [`ActivationFunction`].
-pub fn get_activation_function(func: ActivationFunction) -> fn(f64) -> f64 {
+pub(crate) fn get_activation_function(func: ActivationFunction) -> fn(f64) -> f64 {
     match func {
         ActivationFunction::Sigmoid => sigmoid,
         ActivationFunction::Tanh => tanh,
