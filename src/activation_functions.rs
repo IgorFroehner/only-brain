@@ -309,6 +309,36 @@ pub fn argmax<const N: usize>(values: &[f64; N]) -> usize {
     best.unwrap_or(0)
 }
 
+/// Adds each bias to its value and applies `activation` to the sum, in place and in
+/// one pass.
+///
+/// The variant is matched once and each arm runs its own monomorphized loop, so the
+/// function is inlined into the loop instead of being called through a pointer once
+/// per value. Adding the bias in the same loop keeps every value in a register
+/// between the two steps. The match has no wildcard arm on purpose: a new variant
+/// does not compile until it is handled here.
+pub(crate) fn add_bias_and_activate(activation: ActivationFunction, values: &mut [f64], biases: &[f64]) {
+    #[inline(always)]
+    fn each(values: &mut [f64], biases: &[f64], function: impl Fn(f64) -> f64) {
+        debug_assert_eq!(values.len(), biases.len());
+        for (value, bias) in values.iter_mut().zip(biases) {
+            *value = function(*value + bias);
+        }
+    }
+
+    match activation {
+        ActivationFunction::Sigmoid => each(values, biases, sigmoid),
+        ActivationFunction::Tanh => each(values, biases, tanh),
+        ActivationFunction::ReLU => each(values, biases, relu),
+        ActivationFunction::BinaryStep => each(values, biases, binary_step),
+        ActivationFunction::Identity => each(values, biases, identity),
+        ActivationFunction::LeakyReLU => each(values, biases, leaky_relu),
+        ActivationFunction::ELU => each(values, biases, elu),
+        ActivationFunction::Softplus => each(values, biases, softplus),
+        ActivationFunction::SiLU => each(values, biases, silu),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -411,6 +441,30 @@ mod tests {
                 assert!(
                     (analytic - numeric).abs() < 1e-8,
                     "{function:?} at {x}: derivative {analytic}, numeric {numeric}"
+                );
+            }
+        }
+    }
+
+    /// `add_bias_and_activate` has its own match, so it must agree bit for bit with
+    /// the plain functions for every variant, including the ones whose arm does
+    /// little (`Identity`) or branches (`BinaryStep`). The odd length leaves a
+    /// remainder after any vectorized part of the loop.
+    #[test]
+    fn add_bias_and_activate_matches_the_plain_function_for_every_variant() {
+        let inputs = [-2.0, -0.5, -0.0, 0.0, 0.5, 2.0, 40.0, -40.0, 0.25, -0.25, 1e-3];
+        let biases = [0.5, 0.0, 0.0, -0.0, -0.5, -2.5, 1.0, 0.0, -0.25, 0.25, -1e-3];
+
+        for variant in ActivationFunction::ALL {
+            let mut values = inputs;
+            add_bias_and_activate(variant, &mut values, &biases);
+
+            let expected = get_activation_function(variant);
+            for ((actual, x), bias) in values.into_iter().zip(inputs).zip(biases) {
+                assert_eq!(
+                    actual.to_bits(),
+                    expected(x + bias).to_bits(),
+                    "{variant:?} at {x} + {bias}"
                 );
             }
         }
