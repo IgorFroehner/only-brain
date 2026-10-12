@@ -68,12 +68,14 @@ mod perceptron;
 
 mod io;
 mod bvector;
+mod init;
 
 pub use io::*;
 pub use neural_network::*;
 pub use perceptron::*;
 pub use activation_functions::ActivationFunction;
 pub use bvector::*;
+pub use init::Init;
 
 
 /// Compiles and runs the README's examples as doctests, so they cannot go stale.
