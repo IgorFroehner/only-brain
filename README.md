@@ -53,6 +53,21 @@ fn main() {
 `new` draws the weights uniformly from `[-1, 1)` with zero biases. Use
 `new_with_rng` for a seeded, reproducible start.
 
+That range saturates sigmoid and tanh in deeper networks, so `new_with_init` takes an
+`Init` that scales each layer's range to its shape: `Init::Xavier` for sigmoid and
+tanh layers, `Init::He` for ReLU layers, or `Init::Uniform { low, high }` for a fixed
+range.
+
+```rust
+use only_brain::{ActivationFunction, Init, NeuralNetwork};
+use rand::{rngs::StdRng, SeedableRng};
+
+let mut rng = StdRng::seed_from_u64(42);
+let mut nn = NeuralNetwork::<16, 4>::new_with_init(&[64, 64], Init::He, &mut rng);
+nn.set_activation_function(ActivationFunction::ReLU);
+nn.set_output_activation(ActivationFunction::Sigmoid);
+```
+
 To run many inputs through the same network, such as a whole dataset,
 `feed_forward_batch` takes a slice of inputs and returns one output per input. It
 computes the same values as `feed_forward` but runs each layer as one matrix product
@@ -90,6 +105,8 @@ nn.set_layer_weights(1, &rows);
 // Or address one weight or bias: (layer, neuron, input) and (layer, neuron).
 nn.set_weight(2, 0, 1, 0.5);
 nn.set_bias(2, 0, -0.1);
+assert_eq!(nn.weight(2, 0, 1), 0.5);
+assert_eq!(nn.bias(2, 0), -0.1);
 ```
 
 ### As a flat list of parameters
@@ -131,6 +148,9 @@ let mut nn = NeuralNetwork::<10, 3>::new(&[8]);
 nn.set_activation_function(ActivationFunction::ReLU); // every layer
 nn.set_output_activation(ActivationFunction::Tanh);   // then just the output
 nn.set_layer_activation(1, ActivationFunction::Sigmoid); // or one layer
+
+// Evaluate one on its own.
+assert_eq!(ActivationFunction::ReLU.apply(-2.0), 0.0);
 ```
 
 ## Saving and loading
@@ -175,7 +195,6 @@ let json = serde_json::to_string(&nn)?;
 assert_eq!(json, r#"{"layers":[{"activation":"Sigmoid","weights":[[0.5,-0.25]],"biases":[0.1]}]}"#);
 
 let back: NeuralNetwork<2, 1> = serde_json::from_str(&json)?;
-let back: NeuralNetwork<2, 1> = serde_json::from_str(&json)?;
 
 assert_eq!(back, nn);
 # Ok(())
@@ -184,18 +203,28 @@ assert_eq!(back, nn);
 
 ## Perceptron
 
-A single neuron over a compile-time-sized vector, for the classics.
+A single neuron with `N` inputs, for the classics. Like the network, it takes plain
+arrays, so the input width is checked at compile time.
 
 ```rust
-use only_brain::{bvector, ActivationFunction, Perceptron};
+use only_brain::{ActivationFunction, NeuralNetwork, Perceptron};
 
 let mut and_gate = Perceptron::<2>::new(ActivationFunction::BinaryStep);
-and_gate.set_weights(bvector![1.0, 1.0]);
+and_gate.set_weights([1.0, 1.0]);
 and_gate.set_bias(-1.5);
 
-assert_eq!(and_gate.feed_forward(&bvector![1.0, 1.0]), 1.0);
-assert_eq!(and_gate.feed_forward(&bvector![1.0, 0.0]), 0.0);
+assert_eq!(and_gate.feed_forward(&[1.0, 1.0]), 1.0);
+assert_eq!(and_gate.feed_forward(&[1.0, 0.0]), 0.0);
+assert_eq!(and_gate.weights(), [1.0, 1.0]);
+
+// A perceptron is a network with no hidden layers, which is how it is saved.
+let network = NeuralNetwork::from(and_gate);
+assert_eq!(network.feed_forward(&[1.0, 1.0]), [1.0]);
 ```
+
+`new_with_rng` starts it from random weights, and it implements serde through the
+plain form `{"activation", "weights", "bias"}`. To save one with `dump_model`,
+convert it to a `NeuralNetwork<N, 1>` as above; it loads back as that network.
 
 ## Examples
 
