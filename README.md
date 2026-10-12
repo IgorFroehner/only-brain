@@ -196,7 +196,8 @@ for a complete, seeded neuroevolution run.
 
 Every layer has its own activation function, so hidden layers and the output layer
 can differ. The available ones are `Sigmoid` (the default), `Tanh`, `ReLU`,
-`BinaryStep` and `Identity`.
+`LeakyReLU` (slope 0.01 below zero), `ELU`, `Softplus`, `SiLU` (swish), `BinaryStep`
+and `Identity`.
 
 ```rust
 use only_brain::{ActivationFunction, NeuralNetwork};
@@ -208,6 +209,21 @@ nn.set_layer_activation(1, ActivationFunction::Sigmoid); // or one layer
 
 // Evaluate one on its own.
 assert_eq!(ActivationFunction::ReLU.apply(-2.0), 0.0);
+```
+
+Softmax is not an activation function, because each of its outputs depends on the
+whole layer. For a classifier, use an `Identity` output layer and apply `softmax` to
+the outputs, then `argmax` to pick the class:
+
+```rust
+use only_brain::{argmax, softmax, ActivationFunction, NeuralNetwork};
+
+let mut classifier = NeuralNetwork::<4, 3>::new(&[8]);
+classifier.set_activation_function(ActivationFunction::ReLU);
+classifier.set_output_activation(ActivationFunction::Identity);
+
+let probabilities = softmax(&classifier.feed_forward(&[5.1, 3.5, 1.4, 0.2]));
+let class = argmax(&probabilities);
 ```
 
 ## Saving and loading

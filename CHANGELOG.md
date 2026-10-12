@@ -34,6 +34,20 @@ scaled initialisation and tidier names.
 - The `iris_backprop` example, which trains a 4-8-3 classifier on the Iris dataset
   with backpropagation and SGD written against the public API, reaching 96.7% test
   accuracy. CI runs it.
+- `ActivationFunction::LeakyReLU` (slope fixed at 0.01 for `x < 0`),
+  `ActivationFunction::ELU` (`α = 1`), `ActivationFunction::Softplus` (`ln(1 + e^x)`,
+  computed so it neither overflows nor underflows early for large `|x|`) and
+  `ActivationFunction::SiLU` (swish, `x · sigmoid(x)`), with their derivatives. They
+  are stored in model files as activation codes 5, 6, 7 and 8, and the format version
+  stays 1. Compatibility: a 0.4 or older reader reports a model that uses one of them
+  as `ModelError::Malformed` ("unknown activation function code"), and JSON or other
+  serde output naming one of them does not deserialize in 0.4. Models using only the
+  older functions are byte-for-byte unchanged and still load everywhere.
+- `softmax(&[f64; N]) -> [f64; N]`, a numerically stable softmax (it subtracts the
+  maximum first), and `argmax(&[f64; N]) -> usize`, the index of the largest value.
+  Softmax is not an `ActivationFunction`, because each output depends on the whole
+  layer; the pattern is an `Identity` output layer and
+  `softmax(&nn.feed_forward(&x))`. The `iris_backprop` example uses both.
 
 ### Changed
 
