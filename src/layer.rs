@@ -15,9 +15,11 @@ pub struct Layer {
 }
 
 impl Layer {
-    /// A layer with weights drawn uniformly from `[-1, 1)` and zero biases.
-    pub fn random<T: Rng>(neurons: usize, inputs: usize, activation: ActivationFunction, rng: &mut T) -> Self {
-        let uniform = Uniform::new(-1.0f64, 1.0f64).expect("the range -1..1 is valid");
+    /// A layer with weights drawn uniformly from the range `init` gives for its shape,
+    /// and zero biases.
+    pub fn random<T: Rng>(neurons: usize, inputs: usize, activation: ActivationFunction, init: crate::Init, rng: &mut T) -> Self {
+        let (low, high) = init.bounds(neurons, inputs);
+        let uniform = Uniform::new(low, high).expect("the initialisation range should be finite and non-empty");
 
         Self {
             weights: DMatrix::from_fn(neurons, inputs, |_, _| rng.sample(uniform)),

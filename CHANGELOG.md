@@ -1,5 +1,54 @@
 # Changelog
 
+## 0.5.0
+
+Plain arrays at the whole boundary, a `Perceptron` on par with `NeuralNetwork`,
+scaled initialisation and tidier names.
+
+### Added
+
+- `Init` and `NeuralNetwork::new_with_init(hidden, init, rng)`: weights drawn from
+  `Init::Xavier` (Glorot uniform, for sigmoid and tanh), `Init::He` (He uniform, for
+  ReLU) or `Init::Uniform { low, high }`. `Init::default()` is the `[-1, 1)` of `new`,
+  and `new` and `new_with_rng` produce the same weights for a seed as before.
+- `NeuralNetwork::weight(layer, neuron, input)` and `NeuralNetwork::bias(layer,
+  neuron)`.
+- `Perceptron::weights`, `bias`, `activation_function`, `set_activation_function`,
+  `new_with_rng` (the weights `NeuralNetwork::<N, 1>::new_with_rng(&[], rng)` would
+  draw), `Default` (zero weights and bias, sigmoid), and serde `Serialize` /
+  `Deserialize` through the plain form `{"activation", "weights", "bias"}`, which
+  checks the number of weights.
+- `From<Perceptron<N>> for NeuralNetwork<N, 1>`, a network with no hidden layers and
+  the same weights, bias and activation. Save a perceptron by converting it and calling
+  `dump_model`; it loads back as that network. Its outputs agree with the perceptron's
+  up to floating-point rounding, so a `BinaryStep` perceptron can classify inputs
+  within rounding of its boundary differently.
+- `From<BVector<T, N>> for [T; N]`, to move existing code off `BVector`.
+
+### Changed
+
+- **Breaking:** `Perceptron::set_weights` takes `[f64; N]` and
+  `Perceptron::feed_forward` takes `&[f64; N]` instead of `BVector`s. Migration:
+  replace `bvector![a, b]` with `[a, b]`, or convert an existing `BVector` with
+  `.into()`.
+- **Breaking:** `BVector::data_vector` is private, so no nalgebra type appears in a
+  public signature or field, apart from the `T: SimdRealField` bound on the
+  deprecated `BVector`. Migration: read the elements with `get(i)` or convert with
+  `let array: [f64; N] = vector.into();`.
+- **Breaking:** the free functions `sigmoid`, `tanh`, `relu`, `binary_step`,
+  `identity` and `get_activation_function` are no longer exported. Migration: call
+  `ActivationFunction::Sigmoid.apply(x)` (and so on) instead.
+- `Perceptron`'s `Display` prints its weights as a plain list.
+- Deprecated `BVector` and `bvector!`: plain arrays replace them, and they will be
+  removed in a later release.
+- Deprecated `NeuralNetwork::get_weight` and `NeuralNetwork::get_bias` in favour of
+  `weight` and `bias`. They still work. Migration: drop the `get_` prefix.
+
+### Removed
+
+- **Breaking:** `NeuralNetwork::print`. Migration: `println!("{nn}")`, which
+  `Display` already formats.
+
 ## 0.4.0
 
 Batch inference, and a faster `feed_forward` for small networks.

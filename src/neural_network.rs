@@ -1,4 +1,5 @@
 use crate::activation_functions::ActivationFunction;
+use crate::init::Init;
 use crate::layer::Layer;
 use crate::ModelError;
 use nalgebra::DMatrix;
@@ -112,7 +113,9 @@ impl<const IN: usize, const OUT: usize> NeuralNetwork<IN, OUT> {
     ///
     /// Weights are initialised uniformly at random in `[-1, 1)`, biases at zero, and
     /// every layer uses [`ActivationFunction::Sigmoid`]. Use
-    /// [`NeuralNetwork::new_with_rng`] to control the seed.
+    /// [`NeuralNetwork::new_with_rng`] to control the seed, and
+    /// [`NeuralNetwork::new_with_init`] for a range scaled to each layer, which deeper
+    /// networks need.
     ///
     /// # Panics
     ///
@@ -138,12 +141,53 @@ impl<const IN: usize, const OUT: usize> NeuralNetwork<IN, OUT> {
     /// Seeding the generator makes initialisation reproducible, which is what you want
     /// in tests and when a training run needs to be repeatable.
     ///
+    /// Weights are drawn uniformly from `[-1, 1)` as in [`new`](Self::new), which is
+    /// [`Init::default`]; this is the same network as
+    /// [`new_with_init`](Self::new_with_init) with that init and the same generator.
+    ///
     /// # Panics
     ///
     /// Panics if any hidden layer size is zero.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use only_brain::NeuralNetwork;
+    /// use rand::{rngs::StdRng, SeedableRng};
+    ///
+    /// let first = NeuralNetwork::<2, 1>::new_with_rng(&[3], &mut StdRng::seed_from_u64(7));
+    /// let second = NeuralNetwork::<2, 1>::new_with_rng(&[3], &mut StdRng::seed_from_u64(7));
+    ///
+    /// assert_eq!(first, second);
+    /// ```
     pub fn new_with_rng<R: Rng>(hidden: &[usize], rng: &mut R) -> Self {
+        Self::new_with_init(hidden, Init::default(), rng)
+    }
+
+    /// Creates a new Neural Network whose weights are drawn as `init` describes, using
+    /// the given random number generator. Biases start at zero and every layer uses
+    /// [`ActivationFunction::Sigmoid`].
+    ///
+    /// [`Init::Xavier`] and [`Init::He`] scale each layer's range to its shape, which
+    /// keeps deeper networks out of the flat ends of their activation functions.
+    ///
+    /// # Panics
+    ///
+    /// Panics if any hidden layer size is zero, or if `init` is an [`Init::Uniform`]
+    /// whose range is empty or not finite (including a width `high - low` that overflows).
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use only_brain::{ActivationFunction, Init, NeuralNetwork};
+    ///
+    /// let mut nn = NeuralNetwork::<8, 2>::new_with_init(&[64, 64], Init::He, &mut rand::rng());
+    /// nn.set_activation_function(ActivationFunction::ReLU);
+    /// nn.set_output_activation(ActivationFunction::Identity);
+    /// ```
+    pub fn new_with_init<R: Rng>(hidden: &[usize], init: Init, rng: &mut R) -> Self {
         Self::build(hidden, |neurons, inputs| {
-            Layer::random(neurons, inputs, ActivationFunction::default(), rng)
+            Layer::random(neurons, inputs, ActivationFunction::default(), init, rng)
         })
     }
 
@@ -429,10 +473,32 @@ impl<const IN: usize, const OUT: usize> NeuralNetwork<IN, OUT> {
         self.layer_mut(layer).set_weight(neuron, input, weight);
     }
 
+    /// Returns the weight from neuron `input` of layer `layer - 1` to neuron `neuron` of
+    /// layer `layer`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `layer` is 0, since the input layer has no weights, or past the output
+    /// layer, or if `neuron` or `input` is out of range.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use only_brain::NeuralNetwork;
+    /// let mut nn = NeuralNetwork::<2, 1>::new(&[3]);
+    /// nn.set_weight(2, 0, 1, 0.5);
+    ///
+    /// assert_eq!(nn.weight(2, 0, 1), 0.5);
+    /// ```
+    pub fn weight(&self, layer: usize, neuron: usize, input: usize) -> f64 {
+        self.layer(layer).weights()[(neuron, input)]
+    }
+
     /// Gets the weight of a specific neuron connection. The layer index must be greater
     /// than 0 since the input layer does not have weights.
+    #[deprecated(since = "0.5.0", note = "renamed to `weight`")]
     pub fn get_weight(&self, layer: usize, neuron: usize, input: usize) -> f64 {
-        self.layer(layer).weights()[(neuron, input)]
+        self.weight(layer, neuron, input)
     }
 
     /// Sets the bias of a specific neuron. The layer index must be greater than 0 since
@@ -441,10 +507,31 @@ impl<const IN: usize, const OUT: usize> NeuralNetwork<IN, OUT> {
         self.layer_mut(layer).set_bias(neuron, bias);
     }
 
+    /// Returns the bias of neuron `neuron` of layer `layer`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `layer` is 0, since the input layer has no biases, or past the output
+    /// layer, or if `neuron` is out of range.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use only_brain::NeuralNetwork;
+    /// let mut nn = NeuralNetwork::<2, 1>::new(&[3]);
+    /// nn.set_bias(1, 2, -0.1);
+    ///
+    /// assert_eq!(nn.bias(1, 2), -0.1);
+    /// ```
+    pub fn bias(&self, layer: usize, neuron: usize) -> f64 {
+        self.layer(layer).biases()[neuron]
+    }
+
     /// Gets the bias of a specific neuron. The layer index must be greater than 0 since
     /// the input layer does not have biases.
+    #[deprecated(since = "0.5.0", note = "renamed to `bias`")]
     pub fn get_bias(&self, layer: usize, neuron: usize) -> f64 {
-        self.layer(layer).biases()[neuron]
+        self.bias(layer, neuron)
     }
 
     /// The layer that receives weights for `layer`, which counts the input layer as 0.
@@ -545,12 +632,6 @@ impl<const IN: usize, const OUT: usize> NeuralNetwork<IN, OUT> {
     /// Returns the activation function of the output layer.
     pub fn output_activation(&self) -> ActivationFunction {
         self.layer_activation(self.num_layers() - 1)
-    }
-
-    pub fn print(&self) {
-        for layer in &self.layers {
-            println!("{:?} {} {}", layer.activation(), layer.weights(), layer.biases());
-        }
     }
 }
 
@@ -695,13 +776,61 @@ mod tests {
             for neuron in 0..first.layer_size(layer) {
                 for input in 0..first.layer_size(layer - 1) {
                     assert_eq!(
-                        first.get_weight(layer, neuron, input),
-                        second.get_weight(layer, neuron, input),
+                        first.weight(layer, neuron, input),
+                        second.weight(layer, neuron, input),
                         "weight differs at layer {layer}, neuron {neuron}, input {input}"
                     );
                 }
             }
         }
+    }
+
+    /// `new` and `new_with_rng` must keep producing the same weights for a seed, which
+    /// is what seeded experiments and saved fixtures rely on.
+    #[test]
+    fn new_with_rng_draws_the_same_weights_as_before_init_existed() {
+        let nn = NeuralNetwork::<2, 1>::new_with_rng(&[2], &mut StdRng::seed_from_u64(42));
+
+        // What 0.4.0 did: draw from `Uniform::new(-1.0, 1.0)` directly.
+        let mut rng = StdRng::seed_from_u64(42);
+        let uniform = rand::distr::Uniform::new(-1.0f64, 1.0).unwrap();
+        let mut draw = || rng.sample(uniform);
+        // nalgebra fills each weight matrix column by column.
+        let (w00, w10, w01, w11) = (draw(), draw(), draw(), draw());
+        let (o00, o01) = (draw(), draw());
+
+        assert_eq!(nn.parameters(), vec![w00, w01, w10, w11, 0.0, 0.0, o00, o01, 0.0]);
+    }
+
+    #[test]
+    fn new_with_the_default_init_matches_new_with_rng() {
+        let with_rng = NeuralNetwork::<3, 2>::new_with_rng(&[4, 5], &mut StdRng::seed_from_u64(9));
+        let with_init = NeuralNetwork::<3, 2>::new_with_init(&[4, 5], Init::default(), &mut StdRng::seed_from_u64(9));
+
+        assert_eq!(with_init, with_rng);
+    }
+
+    #[test]
+    fn new_with_init_keeps_every_weight_inside_the_layer_range() {
+        let mut rng = StdRng::seed_from_u64(3);
+
+        for init in [Init::Xavier, Init::He, Init::Uniform { low: 0.25, high: 0.5 }] {
+            let nn = NeuralNetwork::<6, 2>::new_with_init(&[10], init, &mut rng);
+
+            for layer in 1..nn.num_layers() {
+                let (low, high) = init.bounds(nn.layer_size(layer), nn.layer_size(layer - 1));
+                for weight in nn.layer_weights(layer).into_iter().flatten() {
+                    assert!((low..high).contains(&weight), "{init:?}: {weight} outside [{low}, {high})");
+                }
+                assert!(nn.layer_biases(layer).iter().all(|&bias| bias == 0.0));
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "low < high")]
+    fn new_with_init_rejects_an_empty_uniform_range() {
+        NeuralNetwork::<2, 1>::new_with_init(&[], Init::Uniform { low: 1.0, high: -1.0 }, &mut rand::rng());
     }
 
     #[test]
@@ -790,11 +919,11 @@ mod tests {
     }
 
     #[test]
-    fn set_and_get_weight_round_trip() {
+    fn set_weight_and_weight_round_trip() {
         let mut nn = NeuralNetwork::<2, 2>::new(&[]);
         nn.set_weight(1, 1, 0, 0.75);
 
-        assert_eq!(nn.get_weight(1, 1, 0), 0.75);
+        assert_eq!(nn.weight(1, 1, 0), 0.75);
     }
 
     #[test]
@@ -853,8 +982,8 @@ mod tests {
 
         assert_eq!(nn.layer_weights(1), weights.map(Vec::from).to_vec());
         assert_eq!(nn.layer_biases(1), &[0.7, 0.8, 0.9]);
-        // Row = neuron, column = input, matching set_weight and get_weight.
-        assert_eq!(nn.get_weight(1, 2, 0), 0.5);
+        // Row = neuron, column = input, matching set_weight and weight.
+        assert_eq!(nn.weight(1, 2, 0), 0.5);
     }
 
     #[test]
@@ -884,12 +1013,21 @@ mod tests {
     }
 
     #[test]
-    fn set_and_get_bias_round_trip() {
+    fn set_bias_and_bias_round_trip() {
         let mut nn = NeuralNetwork::<2, 2>::new(&[]);
         nn.set_bias(1, 1, -0.3);
 
-        assert_eq!(nn.get_bias(1, 1), -0.3);
+        assert_eq!(nn.bias(1, 1), -0.3);
         assert_eq!(nn.layer_biases(1), &[0.0, -0.3]);
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn the_deprecated_getters_still_read_the_same_values() {
+        let nn = numbered_network();
+
+        assert_eq!(nn.get_weight(1, 1, 0), nn.weight(1, 1, 0));
+        assert_eq!(nn.get_bias(2, 0), nn.bias(2, 0));
     }
 
     #[test]
@@ -967,8 +1105,8 @@ mod tests {
         nn.set_parameters(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]);
 
         assert_eq!(nn, numbered_network());
-        assert_eq!(nn.get_weight(1, 1, 0), 3.0);
-        assert_eq!(nn.get_bias(2, 0), 9.0);
+        assert_eq!(nn.weight(1, 1, 0), 3.0);
+        assert_eq!(nn.bias(2, 0), 9.0);
     }
 
     #[test]

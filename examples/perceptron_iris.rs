@@ -6,7 +6,7 @@
 use std::error::Error;
 use std::fs;
 
-use only_brain::{bvector, ActivationFunction, Perceptron};
+use only_brain::{ActivationFunction, Perceptron};
 
 /// One flower: sepal length and width in centimetres, and 1.0 for versicolor or 0.0
 /// for setosa.
@@ -42,7 +42,7 @@ fn load_samples(path: &str) -> Result<Vec<Sample>, Box<dyn Error>> {
 fn accuracy(perceptron: &Perceptron<2>, samples: &[Sample]) -> f64 {
     let correct = samples
         .iter()
-        .filter(|s| perceptron.feed_forward(&bvector![s.sepal_length, s.sepal_width]) == s.is_versicolor)
+        .filter(|s| perceptron.feed_forward(&[s.sepal_length, s.sepal_width]) == s.is_versicolor)
         .count();
 
     correct as f64 / samples.len() as f64
@@ -53,8 +53,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("Loaded {} setosa and versicolor samples", samples.len());
 
     let learning_rate = 0.1;
-    let mut weights = [0.0, 0.0];
-    let mut bias = 0.0;
     let mut perceptron = Perceptron::<2>::new(ActivationFunction::BinaryStep);
 
     const MAX_EPOCHS: usize = 1000;
@@ -63,19 +61,19 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         for sample in &samples {
             let inputs = [sample.sepal_length, sample.sepal_width];
-            let error = sample.is_versicolor - perceptron.feed_forward(&bvector![inputs[0], inputs[1]]);
+            let error = sample.is_versicolor - perceptron.feed_forward(&inputs);
             if error == 0.0 {
                 continue;
             }
 
             // Perceptron rule: move the boundary towards each misclassified sample.
             mistakes += 1;
+            let mut weights = perceptron.weights();
             for (weight, input) in weights.iter_mut().zip(inputs) {
                 *weight += learning_rate * error * input;
             }
-            bias += learning_rate * error;
-            perceptron.set_weights(bvector![weights[0], weights[1]]);
-            perceptron.set_bias(bias);
+            perceptron.set_weights(weights);
+            perceptron.set_bias(perceptron.bias() + learning_rate * error);
         }
 
         if mistakes == 0 {

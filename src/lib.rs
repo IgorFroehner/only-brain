@@ -61,6 +61,26 @@
 //! Each layer has its own [`ActivationFunction`], and [`dump_model`] and
 //! [`load_model`] save and load networks in a versioned format that keeps reading
 //! files written by earlier versions.
+//!
+//! [`NeuralNetwork::new`] draws weights uniformly from `[-1, 1)`;
+//! [`NeuralNetwork::new_with_init`] takes an [`Init`] that scales the range to each
+//! layer instead, which deeper networks need.
+//!
+//! # Perceptron
+//!
+//! [`Perceptron`] is a single neuron over a plain array of `N` inputs. It converts into
+//! a [`NeuralNetwork<N, 1>`](NeuralNetwork) with no hidden layers, which is how it is
+//! saved.
+//!
+//! ```
+//! use only_brain::{ActivationFunction, Perceptron};
+//!
+//! let mut or_gate = Perceptron::<2>::new(ActivationFunction::BinaryStep);
+//! or_gate.set_weights([1.0, 1.0]);
+//! or_gate.set_bias(-0.5);
+//!
+//! assert_eq!(or_gate.feed_forward(&[0.0, 1.0]), 1.0);
+//! ```
 mod neural_network;
 mod layer;
 mod activation_functions;
@@ -68,12 +88,15 @@ mod perceptron;
 
 mod io;
 mod bvector;
+mod init;
 
 pub use io::*;
 pub use neural_network::*;
 pub use perceptron::*;
-pub use activation_functions::*;
+pub use activation_functions::ActivationFunction;
+#[allow(deprecated)]
 pub use bvector::*;
+pub use init::Init;
 
 
 /// Compiles and runs the README's examples as doctests, so they cannot go stale.

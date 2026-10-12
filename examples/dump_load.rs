@@ -21,5 +21,5 @@ fn main() {
 
     let nn2: NeuralNetwork<2, 2> = load_model("model.bin").expect("Failed to load model");
 
-    nn2.print();
+    println!("{nn2}");
 }
