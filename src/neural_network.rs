@@ -767,8 +767,7 @@ impl<const IN: usize, const OUT: usize> fmt::Display for NeuralNetwork<IN, OUT> 
 ///
 /// Layers are numbered as in the rest of the API: layer 0 is the input layer, whose
 /// [`outputs`](Self::outputs) are the inputs themselves and which has no
-/// pre-activations, and the last layer, [`num_layers()`](Self::num_layers)` - 1`, is
-/// the output layer.
+/// pre-activations, and the last layer, `num_layers() - 1`, is the output layer.
 ///
 /// For a layer `n >= 1` with activation `f`, weights `W` and biases `b`:
 ///
