@@ -60,9 +60,10 @@ commands before considering a change done.
 All modules are private and re-exported flat from `src/lib.rs`, so the public API is
 `only_brain::{NeuralNetwork, Trace, ActivationFunction, softmax, argmax, Init,
 Perceptron, dump_model, load_model, write_model, read_model, ModelError,
-MODEL_FORMAT_VERSION}`, plus the deprecated `BVector` and `bvector!`. `src/lib.rs` re-exports `activation_functions`
-by name: the plain `fn(f64) -> f64` functions there are `pub(crate)`, and a public
-helper function added to that module must also be listed in that `pub use`.
+MODEL_FORMAT_VERSION}`, plus the deprecated `BVector` and `bvector!`. `src/lib.rs`
+re-exports `activation_functions` by name: the plain `fn(f64) -> f64` functions there
+are `pub(crate)`, and a public helper function added to that module must also be
+listed in that `pub use`.
 
 - `src/neural_network.rs`: `NeuralNetwork<IN, OUT>` is a `Vec<Layer>`. The input
   layer is **layer 0** in every public index, has no weights, and is not stored.
