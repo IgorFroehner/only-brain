@@ -57,13 +57,14 @@ impl Init {
     ///
     /// # Panics
     ///
-    /// Panics if a [`Uniform`](Self::Uniform) range is empty or not finite.
+    /// Panics if a [`Uniform`](Self::Uniform) range is empty or not finite, including
+    /// when `high - low` overflows.
     pub(crate) fn bounds(self, neurons: usize, inputs: usize) -> (f64, f64) {
         match self {
             Init::Uniform { low, high } => {
                 assert!(
-                    low.is_finite() && high.is_finite() && low < high,
-                    "Init::Uniform needs finite bounds with low < high, got [{low}, {high})"
+                    low.is_finite() && high.is_finite() && low < high && (high - low).is_finite(),
+                    "Init::Uniform needs finite bounds with low < high and a finite width, got [{low}, {high})"
                 );
                 (low, high)
             }
@@ -109,5 +110,12 @@ mod tests {
     #[should_panic(expected = "finite bounds")]
     fn an_infinite_uniform_range_is_rejected() {
         Init::Uniform { low: f64::NEG_INFINITY, high: 1.0 }.bounds(1, 1);
+    }
+
+    /// Both bounds are finite, but `high - low` overflows, which `Uniform::new` rejects.
+    #[test]
+    #[should_panic(expected = "finite width")]
+    fn a_uniform_range_whose_width_overflows_is_rejected() {
+        Init::Uniform { low: -f64::MAX, high: f64::MAX }.bounds(1, 1);
     }
 }

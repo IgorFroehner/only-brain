@@ -39,7 +39,13 @@ use std::fmt;
 /// The model file format stores networks, and a perceptron is a network with no hidden
 /// layers and one output. Convert it with [`NeuralNetwork::from`] and save that with
 /// [`crate::dump_model`]; [`crate::load_model`] gives it back as a
-/// `NeuralNetwork<N, 1>`, which computes the same function.
+/// `NeuralNetwork<N, 1>` with the same weights, bias and activation.
+///
+/// Its outputs agree with the perceptron's up to floating-point rounding, not bit for
+/// bit: the network adds up the weighted inputs in a different order. A
+/// [`BinaryStep`](ActivationFunction::BinaryStep) perceptron can therefore classify an
+/// input that lies within rounding of its decision boundary differently from the
+/// network.
 ///
 /// ```no_run
 /// use only_brain::{dump_model, load_model, ActivationFunction, NeuralNetwork, Perceptron};
@@ -171,8 +177,13 @@ impl<const N: usize> Default for Perceptron<N> {
 }
 
 impl<const N: usize> From<Perceptron<N>> for NeuralNetwork<N, 1> {
-    /// A network with no hidden layers whose single output neuron is the perceptron, so
-    /// it can be saved with [`crate::dump_model`].
+    /// A network with no hidden layers whose single output neuron has the perceptron's
+    /// weights, bias and activation, so it can be saved with [`crate::dump_model`].
+    ///
+    /// The network adds up the weighted inputs in a different order, so its outputs
+    /// agree with the perceptron's up to floating-point rounding rather than bit for
+    /// bit. With [`BinaryStep`](ActivationFunction::BinaryStep), an input within
+    /// rounding of the decision boundary can be classified differently.
     ///
     /// ```
     /// # use only_brain::{ActivationFunction, NeuralNetwork, Perceptron};
@@ -184,7 +195,9 @@ impl<const N: usize> From<Perceptron<N>> for NeuralNetwork<N, 1> {
     ///
     /// assert_eq!(network.parameters(), vec![0.5, -0.25, 0.1]);
     /// assert_eq!(network.output_activation(), ActivationFunction::Tanh);
-    /// assert_eq!(network.feed_forward(&[1.0, 1.0]), [perceptron.feed_forward(&[1.0, 1.0])]);
+    ///
+    /// let [output] = network.feed_forward(&[1.0, 1.0]);
+    /// assert!((output - perceptron.feed_forward(&[1.0, 1.0])).abs() < 1e-12);
     /// ```
     fn from(perceptron: Perceptron<N>) -> Self {
         // Flat parameter order: the weights of the one neuron, then its bias.
@@ -328,6 +341,24 @@ mod tests {
         }
     }
 
+    /// Wide enough that the perceptron's `dot` and the network's `gemv` add up the
+    /// terms in a different order, so the outputs may differ in the last bits.
+    #[test]
+    fn a_wide_perceptron_and_its_network_agree_up_to_rounding() {
+        let mut rng = StdRng::seed_from_u64(17);
+        let mut perceptron = Perceptron::<64>::new_with_rng(ActivationFunction::Identity, &mut rng);
+        perceptron.set_bias(0.3);
+        let network = NeuralNetwork::from(perceptron.clone());
+
+        for _ in 0..100 {
+            let inputs: [f64; 64] = std::array::from_fn(|_| rng.random_range(-5.0..5.0));
+            let [output] = network.feed_forward(&inputs);
+            let expected = perceptron.feed_forward(&inputs);
+
+            assert!((output - expected).abs() < 1e-10, "{output} vs {expected}");
+        }
+    }
+
     #[test]
     fn serde_round_trips_through_the_plain_form() {
         let mut perceptron = Perceptron::<2>::new(ActivationFunction::BinaryStep);
@@ -342,12 +373,21 @@ mod tests {
     }
 
     #[test]
-    fn deserializing_the_wrong_number_of_weights_is_rejected() {
+    fn deserializing_too_many_weights_is_rejected() {
         let json = r#"{"activation":"Sigmoid","weights":[0.5,-0.25,1.0],"bias":0.1}"#;
 
         let error = serde_json::from_str::<Perceptron<2>>(json).unwrap_err();
 
         assert!(error.to_string().contains("3 input neurons but 2 were expected"), "{error}");
+    }
+
+    #[test]
+    fn deserializing_too_few_weights_is_rejected() {
+        let json = r#"{"activation":"Sigmoid","weights":[0.5],"bias":0.1}"#;
+
+        let error = serde_json::from_str::<Perceptron<2>>(json).unwrap_err();
+
+        assert!(error.to_string().contains("1 input neurons but 2 were expected"), "{error}");
     }
 
     #[test]

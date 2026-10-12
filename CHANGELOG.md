@@ -18,9 +18,11 @@ scaled initialisation and tidier names.
   draw), `Default` (zero weights and bias, sigmoid), and serde `Serialize` /
   `Deserialize` through the plain form `{"activation", "weights", "bias"}`, which
   checks the number of weights.
-- `From<Perceptron<N>> for NeuralNetwork<N, 1>`, a network with no hidden layers. Save
-  a perceptron by converting it and calling `dump_model`; it loads back as that
-  network.
+- `From<Perceptron<N>> for NeuralNetwork<N, 1>`, a network with no hidden layers and
+  the same weights, bias and activation. Save a perceptron by converting it and calling
+  `dump_model`; it loads back as that network. Its outputs agree with the perceptron's
+  up to floating-point rounding, so a `BinaryStep` perceptron can classify inputs
+  within rounding of its boundary differently.
 - `From<BVector<T, N>> for [T; N]`, to move existing code off `BVector`.
 
 ### Changed
@@ -29,8 +31,9 @@ scaled initialisation and tidier names.
   `Perceptron::feed_forward` takes `&[f64; N]` instead of `BVector`s. Migration:
   replace `bvector![a, b]` with `[a, b]`, or convert an existing `BVector` with
   `.into()`.
-- **Breaking:** `BVector::data_vector` is private, so no nalgebra type is reachable
-  through the public API. Migration: read the elements with `get(i)` or convert with
+- **Breaking:** `BVector::data_vector` is private, so no nalgebra type appears in a
+  public signature or field, apart from the `T: SimdRealField` bound on the
+  deprecated `BVector`. Migration: read the elements with `get(i)` or convert with
   `let array: [f64; N] = vector.into();`.
 - **Breaking:** the free functions `sigmoid`, `tanh`, `relu`, `binary_step`,
   `identity` and `get_activation_function` are no longer exported. Migration: call

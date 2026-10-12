@@ -174,7 +174,7 @@ impl<const IN: usize, const OUT: usize> NeuralNetwork<IN, OUT> {
     /// # Panics
     ///
     /// Panics if any hidden layer size is zero, or if `init` is an [`Init::Uniform`]
-    /// whose range is empty or not finite.
+    /// whose range is empty or not finite (including a width `high - low` that overflows).
     ///
     /// # Example
     ///
