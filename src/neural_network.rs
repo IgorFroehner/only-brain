@@ -350,6 +350,57 @@ impl<const IN: usize, const OUT: usize> NeuralNetwork<IN, OUT> {
             .collect()
     }
 
+    /// Feeds the given inputs to the network and returns what every layer computed on
+    /// the way: each layer's pre-activations (`W·x + b`, its weighted sums before the
+    /// activation) and its outputs (the activation applied to them).
+    ///
+    /// This is what backpropagation needs from a forward pass, together with
+    /// [`ActivationFunction::derivative`]. The [`Trace`] uses the same layer numbers as
+    /// the rest of the API, and its last layer's outputs are exactly what
+    /// [`feed_forward`](Self::feed_forward) returns. Unlike `feed_forward`, it
+    /// allocates, so keep it for training rather than inference.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use only_brain::{ActivationFunction, NeuralNetwork};
+    /// // 2 -> 1 -> 1, with known weights.
+    /// let mut nn = NeuralNetwork::<2, 1>::from_parameters(&[1], &[0.5, -0.25, 0.1, 2.0, -1.0]);
+    /// nn.set_layer_activation(1, ActivationFunction::ReLU);
+    /// nn.set_layer_activation(2, ActivationFunction::Identity);
+    ///
+    /// let trace = nn.feed_forward_trace(&[1.0, 2.0]);
+    ///
+    /// // Layer 0 is the input layer: its outputs are the inputs.
+    /// assert_eq!(trace.outputs(0), &[1.0, 2.0]);
+    /// // Layer 1: 0.5 * 1.0 - 0.25 * 2.0 + 0.1 = 0.1, and ReLU(0.1) = 0.1.
+    /// assert_eq!(trace.pre_activations(1), &[0.1]);
+    /// assert_eq!(trace.outputs(1), &[0.1]);
+    /// // Layer 2, the output layer: 2.0 * 0.1 - 1.0 = -0.8.
+    /// assert_eq!(trace.output(), &nn.feed_forward(&[1.0, 2.0]));
+    ///
+    /// // The derivative of each neuron's output with respect to its weighted sum.
+    /// let slope = nn.layer_activation(1).derivative(trace.pre_activations(1)[0]);
+    /// assert_eq!(slope, 1.0);
+    /// ```
+    pub fn feed_forward_trace(&self, inputs: &[f64; IN]) -> Trace {
+        let mut outputs = Vec::with_capacity(self.num_layers());
+        let mut pre_activations = Vec::with_capacity(self.layers.len());
+        outputs.push(inputs.to_vec());
+
+        for layer in &self.layers {
+            let previous = outputs.last().expect("the inputs are always traced");
+            let mut sums = vec![0.0; layer.size()];
+            layer.pre_activations_into(previous, &mut sums);
+
+            let activation = layer.activation();
+            outputs.push(sums.iter().map(|&sum| activation.apply(sum)).collect());
+            pre_activations.push(sums);
+        }
+
+        Trace { outputs, pre_activations }
+    }
+
     /// Returns the number of weights and biases in the network, which is the length of
     /// [`parameters`](Self::parameters).
     pub fn parameter_count(&self) -> usize {
@@ -708,6 +759,163 @@ impl<const IN: usize, const OUT: usize> fmt::Display for NeuralNetwork<IN, OUT> 
             writeln!(f, "Layer {}: {}", index + 1, layer)?;
         }
         Ok(())
+    }
+}
+
+/// Everything one forward pass computed, layer by layer, as returned by
+/// [`NeuralNetwork::feed_forward_trace`].
+///
+/// Layers are numbered as in the rest of the API: layer 0 is the input layer, whose
+/// [`outputs`](Self::outputs) are the inputs themselves and which has no
+/// pre-activations, and the last layer, `num_layers() - 1`, is the output layer.
+///
+/// For a layer `n >= 1` with activation `f`, weights `W` and biases `b`:
+///
+/// - `pre_activations(n) = W · outputs(n - 1) + b`
+/// - `outputs(n) = f(pre_activations(n))`, element by element.
+///
+/// So the gradient of a loss with respect to layer `n`'s weights is
+/// `delta(n) · outputs(n - 1)ᵀ`, where `delta(n)` is the gradient with respect to its
+/// outputs multiplied by `f.derivative(pre_activations(n))` element by element.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Trace {
+    /// `outputs[0]` is the inputs, `outputs[n]` the outputs of layer `n`.
+    outputs: Vec<Vec<f64>>,
+    /// `pre_activations[n - 1]` belongs to layer `n`.
+    pre_activations: Vec<Vec<f64>>,
+}
+
+impl Trace {
+    /// The number of layers traced, counting the input layer, the same as the
+    /// network's [`num_layers()`](NeuralNetwork::num_layers).
+    pub fn num_layers(&self) -> usize {
+        self.outputs.len()
+    }
+
+    /// The weighted sums `W·x + b` of every neuron of the given layer, before its
+    /// activation is applied.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `layer` is 0, since the input layer has no weights, or past the
+    /// output layer.
+    pub fn pre_activations(&self, layer: usize) -> &[f64] {
+        if layer == 0 {
+            panic!("Invalid layer index");
+        }
+        &self.pre_activations[layer - 1]
+    }
+
+    /// The outputs of every neuron of the given layer, after its activation. Layer 0
+    /// is the input layer, so its outputs are the inputs.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `layer` is past the output layer.
+    pub fn outputs(&self, layer: usize) -> &[f64] {
+        &self.outputs[layer]
+    }
+
+    /// The outputs of the output layer, the same values
+    /// [`feed_forward`](NeuralNetwork::feed_forward) returns.
+    pub fn output(&self) -> &[f64] {
+        self.outputs.last().expect("a trace always holds the inputs")
+    }
+}
+
+#[cfg(test)]
+mod trace_tests {
+    use super::*;
+    use rand::rngs::StdRng;
+    use rand::SeedableRng;
+
+    fn mixed_network() -> NeuralNetwork<3, 2> {
+        let mut rng = StdRng::seed_from_u64(11);
+        let mut nn = NeuralNetwork::<3, 2>::new_with_rng(&[5, 4], &mut rng);
+        nn.set_layer_activation(1, ActivationFunction::ReLU);
+        nn.set_layer_activation(2, ActivationFunction::Tanh);
+        nn.set_layer_activation(3, ActivationFunction::Sigmoid);
+        nn.set_layer_biases(1, &[0.1, -0.2, 0.3, -0.4, 0.5]);
+        nn
+    }
+
+    fn assert_trace_matches_feed_forward(nn: &NeuralNetwork<3, 2>, context: &str) {
+        for input in [[0.0, 0.0, 0.0], [1.0, -2.0, 0.5], [-0.3, 0.7, 4.0]] {
+            let trace = nn.feed_forward_trace(&input);
+
+            assert_eq!(trace.output(), &nn.feed_forward(&input), "{context}, input {input:?}");
+            assert_eq!(trace.outputs(trace.num_layers() - 1), trace.output(), "{context}");
+        }
+    }
+
+    #[test]
+    fn the_traced_output_is_exactly_what_feed_forward_returns() {
+        // feed_forward keeps its scratch on the stack up to 16 neurons per layer and
+        // on the heap beyond that, so one network takes each path.
+        let paths: [(&[usize], bool); 2] = [(&[5, 4], false), (&[24, 17], true)];
+        for (hidden, wider_than_the_stack_scratch) in paths {
+            let mut nn = NeuralNetwork::<3, 2>::new_with_rng(hidden, &mut StdRng::seed_from_u64(11));
+            assert_eq!(nn.widest_layer() > 16, wider_than_the_stack_scratch);
+
+            for activation in ActivationFunction::ALL {
+                for layer in 1..nn.num_layers() {
+                    nn.set_layer_activation(layer, activation);
+                }
+                assert_trace_matches_feed_forward(&nn, &format!("{activation:?}, hidden layers {hidden:?}"));
+            }
+        }
+
+        assert_trace_matches_feed_forward(&mixed_network(), "mixed activations");
+    }
+
+    #[test]
+    fn every_hidden_layers_outputs_are_its_activated_pre_activations() {
+        let nn = mixed_network();
+        let trace = nn.feed_forward_trace(&[1.0, -2.0, 0.5]);
+
+        assert_eq!(trace.num_layers(), nn.num_layers());
+        assert_eq!(trace.outputs(0), &[1.0, -2.0, 0.5]);
+        for layer in 1..trace.num_layers() {
+            let activation = nn.layer_activation(layer);
+            let expected: Vec<f64> = trace.pre_activations(layer).iter().map(|&x| activation.apply(x)).collect();
+
+            assert_eq!(trace.pre_activations(layer).len(), nn.layer_size(layer));
+            assert_eq!(trace.outputs(layer), expected.as_slice());
+        }
+    }
+
+    #[test]
+    fn pre_activations_are_the_weighted_sums_of_the_previous_layer() {
+        let nn = mixed_network();
+        let trace = nn.feed_forward_trace(&[1.0, -2.0, 0.5]);
+
+        for layer in 1..trace.num_layers() {
+            let inputs = trace.outputs(layer - 1);
+            let rows = nn.layer_weights(layer);
+            for (neuron, row) in rows.iter().enumerate() {
+                let sum: f64 = row.iter().zip(inputs).map(|(w, x)| w * x).sum::<f64>()
+                    + nn.layer_biases(layer)[neuron];
+                let traced = trace.pre_activations(layer)[neuron];
+                assert!((traced - sum).abs() < 1e-12, "layer {layer}, neuron {neuron}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_network_without_hidden_layers_traces_one_layer() {
+        let nn = NeuralNetwork::<2, 1>::from_parameters(&[], &[0.5, -0.25, 0.1]);
+        let trace = nn.feed_forward_trace(&[1.0, 2.0]);
+
+        assert_eq!(trace.num_layers(), 2);
+        assert!((trace.pre_activations(1)[0] - 0.1).abs() < 1e-12);
+        assert_eq!(trace.output(), &nn.feed_forward(&[1.0, 2.0]));
+    }
+
+    #[test]
+    #[should_panic(expected = "Invalid layer index")]
+    fn the_input_layer_has_no_pre_activations() {
+        let nn = mixed_network();
+        nn.feed_forward_trace(&[0.0; 3]).pre_activations(0);
     }
 }
 

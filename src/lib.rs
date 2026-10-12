@@ -36,6 +36,10 @@
 //!
 //! - **Per layer**: [`NeuralNetwork::layer_weights`], [`NeuralNetwork::set_layer_biases`]
 //!   and friends, for methods that reason about layers, such as backpropagation.
+//!   [`NeuralNetwork::feed_forward_trace`] runs a forward pass that keeps every
+//!   layer's pre-activations and outputs in a [`Trace`], and
+//!   [`ActivationFunction::derivative`] gives each activation's slope, which together
+//!   are what backpropagation needs from the network.
 //! - **Flat**: [`NeuralNetwork::parameters`], [`NeuralNetwork::set_parameters`] and
 //!   [`NeuralNetwork::from_parameters`], for methods that search a list of numbers,
 //!   such as genetic algorithms. A genome of

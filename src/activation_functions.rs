@@ -44,6 +44,48 @@ impl ActivationFunction {
         get_activation_function(self)(x)
     }
 
+    /// The derivative of the function with respect to its input `x`, the neuron's
+    /// pre-activation (weighted sum), as backpropagation needs it.
+    ///
+    /// Two functions are not differentiable everywhere, so they follow a convention:
+    ///
+    /// - [`ReLU`](Self::ReLU) has derivative `1` for `x > 0` and `0` for `x <= 0`,
+    ///   so `0` at `x = 0`, the usual choice in deep learning libraries.
+    /// - [`BinaryStep`](Self::BinaryStep) has derivative `0` everywhere, including at
+    ///   `x = 0` where it jumps. No gradient flows through it, so a layer using it
+    ///   cannot be trained by gradient descent; train it with a gradient-free method,
+    ///   such as a genetic algorithm, instead.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use only_brain::ActivationFunction;
+    /// // sigmoid'(0) = sigmoid(0) * (1 - sigmoid(0))
+    /// assert_eq!(ActivationFunction::Sigmoid.derivative(0.0), 0.25);
+    /// assert_eq!(ActivationFunction::Tanh.derivative(0.0), 1.0);
+    /// assert_eq!(ActivationFunction::ReLU.derivative(3.0), 1.0);
+    /// assert_eq!(ActivationFunction::ReLU.derivative(0.0), 0.0);
+    /// assert_eq!(ActivationFunction::BinaryStep.derivative(0.0), 0.0);
+    /// assert_eq!(ActivationFunction::Identity.derivative(-2.0), 1.0);
+    /// ```
+    pub fn derivative(self, x: f64) -> f64 {
+        match self {
+            ActivationFunction::Sigmoid => {
+                let s = sigmoid(x);
+                s * (1.0 - s)
+            }
+            ActivationFunction::Tanh => {
+                let t = x.tanh();
+                1.0 - t * t
+            }
+            ActivationFunction::ReLU => {
+                if x > 0.0 { 1.0 } else { 0.0 }
+            }
+            ActivationFunction::BinaryStep => 0.0,
+            ActivationFunction::Identity => 1.0,
+        }
+    }
+
     /// The byte that stands for this function in the model file format.
     ///
     /// These codes are part of the format and never change; new functions get new
@@ -172,6 +214,46 @@ mod tests {
             assert_eq!(ActivationFunction::from_code(code), Some(function));
         }
         assert_eq!(ActivationFunction::from_code(5), None);
+    }
+
+    /// Compares every derivative with a central finite difference of `apply`, away
+    /// from zero, where ReLU and BinaryStep are not differentiable.
+    #[test]
+    fn every_derivative_matches_a_numeric_derivative() {
+        const H: f64 = 1e-6;
+
+        for function in ActivationFunction::ALL {
+            for x in [-3.0, -1.2, -0.4, 0.3, 0.9, 2.5] {
+                let numeric = (function.apply(x + H) - function.apply(x - H)) / (2.0 * H);
+                let analytic = function.derivative(x);
+                assert!(
+                    (analytic - numeric).abs() < 1e-8,
+                    "{function:?} at {x}: derivative {analytic}, numeric {numeric}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn relu_derivative_is_zero_at_zero_and_one_just_above() {
+        assert_eq!(ActivationFunction::ReLU.derivative(0.0), 0.0);
+        assert_eq!(ActivationFunction::ReLU.derivative(-0.0), 0.0);
+        assert_eq!(ActivationFunction::ReLU.derivative(f64::MIN_POSITIVE), 1.0);
+    }
+
+    #[test]
+    fn binary_step_derivative_is_zero_everywhere_including_the_jump() {
+        for x in [-1.0, -f64::MIN_POSITIVE, 0.0, f64::MIN_POSITIVE, 1.0] {
+            assert_eq!(ActivationFunction::BinaryStep.derivative(x), 0.0);
+        }
+    }
+
+    #[test]
+    fn saturated_sigmoid_and_tanh_have_a_vanishing_derivative() {
+        for function in [ActivationFunction::Sigmoid, ActivationFunction::Tanh] {
+            assert_eq!(function.derivative(1000.0), 0.0);
+            assert_eq!(function.derivative(-1000.0), 0.0);
+        }
     }
 
     #[test]
