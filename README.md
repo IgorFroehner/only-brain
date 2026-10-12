@@ -109,6 +109,60 @@ assert_eq!(nn.weight(2, 0, 1), 0.5);
 assert_eq!(nn.bias(2, 0), -0.1);
 ```
 
+Backpropagation also needs what the forward pass computed at every layer.
+`feed_forward_trace` runs the network once and keeps each layer's pre-activations
+(`W·x + b`) and outputs, and `ActivationFunction::derivative` gives the slope of each
+activation at a pre-activation. With the layer getters and setters, that is a full
+gradient descent step:
+
+```rust
+use only_brain::{ActivationFunction, NeuralNetwork};
+
+// A 2 -> 2 -> 1 network with known starting weights.
+let mut nn = NeuralNetwork::<2, 1>::from_parameters(&[2], &[0.1, 0.2, 0.3, 0.4, 0.0, 0.0, 0.5, -0.5, 0.0]);
+nn.set_activation_function(ActivationFunction::Tanh);
+
+let (input, target, learning_rate) = ([1.0, 0.5], 0.8, 0.1);
+let loss = |nn: &NeuralNetwork<2, 1>| (nn.feed_forward(&input)[0] - target).powi(2) / 2.0;
+let before = loss(&nn);
+
+// Forward, keeping every layer's pre-activations and outputs.
+let trace = nn.feed_forward_trace(&input);
+
+// Backward, from the output layer to layer 1. `gradient` is the loss's gradient
+// with respect to the current layer's outputs.
+let mut gradient = vec![trace.output()[0] - target];
+for layer in (1..nn.num_layers()).rev() {
+    let activation = nn.layer_activation(layer);
+    let delta: Vec<f64> = gradient.iter().zip(trace.pre_activations(layer))
+        .map(|(g, &z)| g * activation.derivative(z))
+        .collect();
+
+    let inputs = trace.outputs(layer - 1); // layer 0's outputs are the inputs
+    let mut weights = nn.layer_weights(layer);
+    gradient = (0..inputs.len())
+        .map(|i| delta.iter().zip(&weights).map(|(d, row)| d * row[i]).sum())
+        .collect();
+
+    for (row, d) in weights.iter_mut().zip(&delta) {
+        for (w, x) in row.iter_mut().zip(inputs) {
+            *w -= learning_rate * d * x;
+        }
+    }
+    let biases: Vec<f64> = nn.layer_biases(layer).iter().zip(&delta)
+        .map(|(b, d)| b - learning_rate * d)
+        .collect();
+    nn.set_layer_weights(layer, &weights);
+    nn.set_layer_biases(layer, &biases);
+}
+
+assert!(loss(&nn) < before);
+```
+
+See
+[`examples/iris_backprop.rs`](https://github.com/IgorFroehner/only-brain/blob/main/examples/iris_backprop.rs)
+for a classifier trained this way.
+
 ### As a flat list of parameters
 
 Genetic algorithms and other black-box searches work on a flat list of numbers.
@@ -233,6 +287,7 @@ convert it to a `NeuralNetwork<N, 1>` as above; it loads back as that network.
 | `neural_network` | Building a network by hand and running it. |
 | `dump_load` | Saving and loading a model. |
 | `xor_evolution` | Evolving a network with a genetic algorithm through the flat parameter view. |
+| `iris_backprop` | Training a classifier on the Iris dataset with backpropagation, through the traced forward pass. |
 | `perceptron` | A single perceptron. |
 | `perceptron_iris` | Training a perceptron on the Iris dataset with the perceptron rule. |
 

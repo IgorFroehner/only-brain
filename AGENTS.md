@@ -23,6 +23,7 @@ cargo clippy --all-targets -- -D warnings       # CI fails on any warning
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps  # CI fails on broken intra-doc links
 cargo bench                                     # criterion; `cargo bench -- feed_forward` for one group
 cargo run --example xor_evolution               # end-to-end check of the flat parameter view, run in CI
+cargo run --example iris_backprop               # end-to-end check of backprop through the public API, run in CI
 cargo publish --dry-run                         # CI packages the crate on every push
 ```
 
@@ -57,7 +58,7 @@ commands before considering a change done.
 ## Architecture
 
 All modules are private and re-exported flat from `src/lib.rs`, so the public API is
-`only_brain::{NeuralNetwork, ActivationFunction, Init, Perceptron, dump_model,
+`only_brain::{NeuralNetwork, Trace, ActivationFunction, Init, Perceptron, dump_model,
 load_model, write_model, read_model, ModelError, MODEL_FORMAT_VERSION}`, plus the
 deprecated `BVector` and `bvector!`. `src/lib.rs` re-exports `activation_functions`
 by name: the plain `fn(f64) -> f64` functions there are `pub(crate)`, and a public
@@ -69,6 +70,8 @@ helper function added to that module must also be listed in that `pub use`.
   `"Invalid layer index"`. `num_layers()` counts the input layer. Setters panic on
   shape mismatch with messages the unit tests assert on (`"Incompatible weights
   matrix size"`, `"Incompatible biases vector size"`, `"at least one neuron"`).
+  `Trace`, returned by `feed_forward_trace`, lives here too and uses the same layer
+  numbering: `outputs(0)` is the inputs, `pre_activations(0)` panics.
 - `src/layer.rs`: `Layer` holds a nalgebra `DMatrix` (one row per neuron,
   column-major in memory) and a `DVector` of biases. nalgebra never crosses the
   public boundary: every public method takes and returns arrays, slices or `Vec`s.
@@ -76,7 +79,8 @@ helper function added to that module must also be listed in that `pub use`.
   layer with a single scratch buffer per call (on the stack when the widest layer
   has at most 16 neurons, which a benchmark showed beats a larger stack buffer).
   `forward_batch_into` is its `gemm` counterpart behind `feed_forward_batch`, one
-  column per sample. `extend_parameters` /
+  column per sample. `pre_activations_into` computes `W·x + b` without the
+  activation, for `feed_forward_trace`. `extend_parameters` /
   `take_parameters` define the flat order.
 - **`NetworkData` / `LayerData` are the single validation funnel.** They are the
   serde form of a network (`{"layers": [{"activation", "weights", "biases"}]}`).

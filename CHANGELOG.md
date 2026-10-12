@@ -24,6 +24,16 @@ scaled initialisation and tidier names.
   up to floating-point rounding, so a `BinaryStep` perceptron can classify inputs
   within rounding of its boundary differently.
 - `From<BVector<T, N>> for [T; N]`, to move existing code off `BVector`.
+- `NeuralNetwork::feed_forward_trace`, a forward pass that returns a `Trace` of every
+  layer's pre-activations (`W·x + b`) and outputs, numbered like the rest of the API
+  (layer 0 is the input layer, whose outputs are the inputs). Its output is exactly
+  what `feed_forward` returns.
+- `ActivationFunction::derivative`, the derivative of each activation with respect to
+  its pre-activation. `ReLU`'s derivative is 0 at 0, and `BinaryStep`'s is 0
+  everywhere, so it cannot be trained by gradient descent.
+- The `iris_backprop` example, which trains a 4-8-3 classifier on the Iris dataset
+  with backpropagation and SGD written against the public API, reaching 96.7% test
+  accuracy. CI runs it.
 
 ### Changed
 
