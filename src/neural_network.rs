@@ -839,16 +839,33 @@ mod trace_tests {
         nn
     }
 
-    #[test]
-    fn the_traced_output_is_exactly_what_feed_forward_returns() {
-        let nn = mixed_network();
-
+    fn assert_trace_matches_feed_forward(nn: &NeuralNetwork<3, 2>, context: &str) {
         for input in [[0.0, 0.0, 0.0], [1.0, -2.0, 0.5], [-0.3, 0.7, 4.0]] {
             let trace = nn.feed_forward_trace(&input);
 
-            assert_eq!(trace.output(), &nn.feed_forward(&input));
-            assert_eq!(trace.outputs(trace.num_layers() - 1), trace.output());
+            assert_eq!(trace.output(), &nn.feed_forward(&input), "{context}, input {input:?}");
+            assert_eq!(trace.outputs(trace.num_layers() - 1), trace.output(), "{context}");
         }
+    }
+
+    #[test]
+    fn the_traced_output_is_exactly_what_feed_forward_returns() {
+        // feed_forward keeps its scratch on the stack up to 16 neurons per layer and
+        // on the heap beyond that, so one network takes each path.
+        let paths: [(&[usize], bool); 2] = [(&[5, 4], false), (&[24, 17], true)];
+        for (hidden, wider_than_the_stack_scratch) in paths {
+            let mut nn = NeuralNetwork::<3, 2>::new_with_rng(hidden, &mut StdRng::seed_from_u64(11));
+            assert_eq!(nn.widest_layer() > 16, wider_than_the_stack_scratch);
+
+            for activation in ActivationFunction::ALL {
+                for layer in 1..nn.num_layers() {
+                    nn.set_layer_activation(layer, activation);
+                }
+                assert_trace_matches_feed_forward(&nn, &format!("{activation:?}, hidden layers {hidden:?}"));
+            }
+        }
+
+        assert_trace_matches_feed_forward(&mixed_network(), "mixed activations");
     }
 
     #[test]
