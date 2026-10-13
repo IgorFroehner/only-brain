@@ -781,14 +781,14 @@ impl<const IN: usize, const OUT: usize> TryFrom<NetworkData> for NeuralNetwork<I
     /// each layer agrees with itself.
     fn try_from(data: NetworkData) -> Result<Self, Self::Error> {
         let first = data.layers.first().ok_or(ModelError::EmptyNetwork)?;
-        if let Some(row) = first.weights.first() {
-            if row.len() != IN {
-                return Err(ModelError::DimensionMismatch {
-                    end: "input",
-                    expected: IN,
-                    found: row.len(),
-                });
-            }
+        if let Some(row) = first.weights.first()
+            && row.len() != IN
+        {
+            return Err(ModelError::DimensionMismatch {
+                end: "input",
+                expected: IN,
+                found: row.len(),
+            });
         }
 
         let mut inputs = IN;
