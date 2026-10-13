@@ -33,16 +33,29 @@ jobs:
       # the trace and the activation derivatives. It asserts a test accuracy.
       - run: cargo run --example iris_backprop
 
+  msrv:
+    name: MSRV
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Keep in sync with `rust-version` in Cargo.toml.
+      - uses: dtolnay/rust-toolchain@1.88
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --all-targets
+
   clippy:
-    name: Clippy
+    name: Clippy and rustfmt
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy
+          components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo fmt --check
+      # The fuzz crate is a separate package, which the line above does not cover.
+      - run: cargo fmt --check --manifest-path fuzz/Cargo.toml
 
   docs:
     name: Docs
@@ -64,3 +77,56 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       # Builds the crate exactly as it would be published.
       - run: cargo publish --dry-run
+
+  semver:
+    name: Semver
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-semver-checks
+      # Compares the public API against the latest release on crates.io, judging the
+      # changes by the version in Cargo.toml: on 0.x, a minor bump may break, a patch
+      # bump may not.
+      #
+      # 0.5.0 breaks 0.4.0's API on purpose (see CHANGELOG.md), but Cargo.toml says
+      # 0.4.0 until the `release: 0.5.0` commit, so those breaks are reported as if
+      # for a patch release. While the version is 0.4.0 they are only a warning; once
+      # it is bumped, every reported break fails the job. Drop the `if` after 0.5.0
+      # is released.
+      - name: cargo semver-checks
+        run: |
+          if grep -qx 'version = "0.4.0"' Cargo.toml; then
+            cargo semver-checks ||
+              echo "::warning title=semver-checks::Breaking changes against 0.4.0, expected until the version is bumped to 0.5.0"
+          else
+            cargo semver-checks
+          fi
+
+  fuzz:
+    name: Fuzz (smoke)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz -> target
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
+      # A minute per target: read_model must return an error, never panic, on any
+      # bytes. It starts from the format fixtures, real files of both formats.
+      - run: mkdir -p fuzz/corpus/read_model
+      - run: cargo fuzz run read_model fuzz/corpus/read_model tests/fixtures -- -max_total_time=60
+      - run: cargo fuzz run mutated_model -- -max_total_time=60
+      # The input that crashed, to reproduce locally with `cargo +nightly fuzz run
+      # <target> <file>`.
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts
+          path: fuzz/artifacts
