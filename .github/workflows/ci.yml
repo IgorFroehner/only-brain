@@ -120,9 +120,11 @@ jobs:
           tool: cargo-fuzz
       # A minute per target: read_model must return an error, never panic, on any
       # bytes. It starts from the format fixtures, real files of both formats.
+      # The prebuilt cargo-fuzz is a musl binary and would default to building for
+      # musl, where the address sanitizer is unavailable, so the target is explicit.
       - run: mkdir -p fuzz/corpus/read_model
-      - run: cargo fuzz run read_model fuzz/corpus/read_model tests/fixtures -- -max_total_time=60
-      - run: cargo fuzz run mutated_model -- -max_total_time=60
+      - run: cargo fuzz run --target x86_64-unknown-linux-gnu read_model fuzz/corpus/read_model tests/fixtures -- -max_total_time=60
+      - run: cargo fuzz run --target x86_64-unknown-linux-gnu mutated_model -- -max_total_time=60
       # The input that crashed, to reproduce locally with `cargo +nightly fuzz run
       # <target> <file>`.
       - if: failure()
