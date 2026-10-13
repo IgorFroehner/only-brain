@@ -15,10 +15,10 @@
 use std::error::Error;
 use std::fs;
 
-use only_brain::{argmax, softmax, ActivationFunction, NeuralNetwork};
+use only_brain::{ActivationFunction, NeuralNetwork, argmax, softmax};
+use rand::SeedableRng;
 use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
-use rand::SeedableRng;
 
 type Classifier = NeuralNetwork<4, 3>;
 
@@ -53,7 +53,12 @@ fn load_samples(path: &str) -> Result<Vec<Sample>, Box<dyn Error>> {
             .ok_or_else(|| format!("unknown species {:?}", fields[5]))?;
 
         samples.push(Sample {
-            features: [fields[1].parse()?, fields[2].parse()?, fields[3].parse()?, fields[4].parse()?],
+            features: [
+                fields[1].parse()?,
+                fields[2].parse()?,
+                fields[3].parse()?,
+                fields[4].parse()?,
+            ],
             species,
         });
     }
@@ -67,7 +72,11 @@ fn standardize(train: &mut [Sample], test: &mut [Sample]) {
     for feature in 0..4 {
         let n = train.len() as f64;
         let mean = train.iter().map(|s| s.features[feature]).sum::<f64>() / n;
-        let variance = train.iter().map(|s| (s.features[feature] - mean).powi(2)).sum::<f64>() / n;
+        let variance = train
+            .iter()
+            .map(|s| (s.features[feature] - mean).powi(2))
+            .sum::<f64>()
+            / n;
         let deviation = variance.sqrt();
 
         for sample in train.iter_mut().chain(test.iter_mut()) {
@@ -109,7 +118,13 @@ fn train_step(nn: &mut Classifier, sample: &Sample, learning_rate: f64) -> f64 {
         // which have nothing to train.
         if layer > 1 {
             output_gradient = (0..inputs.len())
-                .map(|input| delta.iter().zip(&weights).map(|(d, row)| d * row[input]).sum())
+                .map(|input| {
+                    delta
+                        .iter()
+                        .zip(&weights)
+                        .map(|(d, row)| d * row[input])
+                        .sum()
+                })
                 .collect();
         }
 
@@ -152,7 +167,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut test = samples.split_off(samples.len() - TEST_SAMPLES);
     let mut train = samples;
     standardize(&mut train, &mut test);
-    println!("Loaded {} training and {} test samples", train.len(), test.len());
+    println!(
+        "Loaded {} training and {} test samples",
+        train.len(),
+        test.len()
+    );
 
     let mut nn = Classifier::new_with_rng(HIDDEN, &mut rng);
     nn.set_activation_function(ActivationFunction::Tanh);
@@ -161,7 +180,10 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     for epoch in 1..=EPOCHS {
         train.shuffle(&mut rng);
-        let loss: f64 = train.iter().map(|sample| train_step(&mut nn, sample, LEARNING_RATE)).sum();
+        let loss: f64 = train
+            .iter()
+            .map(|sample| train_step(&mut nn, sample, LEARNING_RATE))
+            .sum();
 
         if epoch == 1 || epoch % 10 == 0 {
             println!(

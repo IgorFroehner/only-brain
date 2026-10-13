@@ -85,23 +85,22 @@
 //!
 //! assert_eq!(or_gate.feed_forward(&[0.0, 1.0]), 1.0);
 //! ```
-mod neural_network;
-mod layer;
 mod activation_functions;
+mod layer;
+mod neural_network;
 mod perceptron;
 
-mod io;
 mod bvector;
 mod init;
+mod io;
 
-pub use io::*;
-pub use neural_network::*;
-pub use perceptron::*;
-pub use activation_functions::{argmax, softmax, ActivationFunction};
+pub use activation_functions::{ActivationFunction, argmax, softmax};
 #[allow(deprecated)]
 pub use bvector::*;
 pub use init::Init;
-
+pub use io::*;
+pub use neural_network::*;
+pub use perceptron::*;
 
 /// Compiles and runs the README's examples as doctests, so they cannot go stale.
 #[doc = include_str!("../README.md")]

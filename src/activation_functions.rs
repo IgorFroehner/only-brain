@@ -140,21 +140,37 @@ impl ActivationFunction {
                 1.0 - t * t
             }
             ActivationFunction::ReLU => {
-                if x > 0.0 { 1.0 } else { 0.0 }
+                if x > 0.0 {
+                    1.0
+                } else {
+                    0.0
+                }
             }
             ActivationFunction::BinaryStep => 0.0,
             ActivationFunction::Identity => 1.0,
             ActivationFunction::LeakyReLU => {
-                if x > 0.0 { 1.0 } else { LEAKY_RELU_SLOPE }
+                if x > 0.0 {
+                    1.0
+                } else {
+                    LEAKY_RELU_SLOPE
+                }
             }
             ActivationFunction::ELU => {
-                if x >= 0.0 { 1.0 } else { x.exp() }
+                if x >= 0.0 {
+                    1.0
+                } else {
+                    x.exp()
+                }
             }
             ActivationFunction::Softplus => sigmoid(x),
             ActivationFunction::SiLU => {
                 let s = sigmoid(x);
                 // The limits, 0 and 1, which `x * (1 - s)` would turn into NaN.
-                if x.is_infinite() { s } else { s * (1.0 + x * (1.0 - s)) }
+                if x.is_infinite() {
+                    s
+                } else {
+                    s * (1.0 + x * (1.0 - s))
+                }
             }
         }
     }
@@ -180,7 +196,9 @@ impl ActivationFunction {
 
     /// The inverse of [`ActivationFunction::code`].
     pub(crate) fn from_code(code: u8) -> Option<Self> {
-        Self::ALL.into_iter().find(|function| function.code() == code)
+        Self::ALL
+            .into_iter()
+            .find(|function| function.code() == code)
     }
 }
 
@@ -223,7 +241,11 @@ pub(crate) fn softplus(x: f64) -> f64 {
 
 pub(crate) fn silu(x: f64) -> f64 {
     // `-inf * 0` is NaN, but the limit at -infinity is 0.
-    if x == f64::NEG_INFINITY { 0.0 } else { x * sigmoid(x) }
+    if x == f64::NEG_INFINITY {
+        0.0
+    } else {
+        x * sigmoid(x)
+    }
 }
 
 /// Returns the plain function behind an [`ActivationFunction`].
@@ -336,7 +358,11 @@ pub(crate) fn add_bias_and_activate<'a>(
     ) {
         for column in columns {
             // `zip` would silently skip the extra values of a longer column.
-            assert_eq!(column.len(), biases.len(), "a column must hold one value per bias");
+            assert_eq!(
+                column.len(),
+                biases.len(),
+                "a column must hold one value per bias"
+            );
             for (value, bias) in column.iter_mut().zip(biases) {
                 *value = function(*value + bias);
             }
@@ -469,13 +495,21 @@ mod tests {
     /// odd length leaves a remainder after any vectorized part of the loop.
     #[test]
     fn add_bias_and_activate_matches_apply_for_every_variant_and_column() {
-        let first = [-2.0, -0.5, -0.0, 0.0, 0.5, 2.0, 40.0, -40.0, 0.25, -0.25, 1e-3];
+        let first = [
+            -2.0, -0.5, -0.0, 0.0, 0.5, 2.0, 40.0, -40.0, 0.25, -0.25, 1e-3,
+        ];
         let second = first.map(|x| -1.5 * x);
-        let biases = [0.5, 0.0, 0.0, -0.0, -0.5, -2.5, 1.0, 0.0, -0.25, 0.25, -1e-3];
+        let biases = [
+            0.5, 0.0, 0.0, -0.0, -0.5, -2.5, 1.0, 0.0, -0.25, 0.25, -1e-3,
+        ];
 
         for variant in ActivationFunction::ALL {
             let mut columns = [first, second];
-            add_bias_and_activate(variant, &biases, columns.iter_mut().map(|column| column.as_mut_slice()));
+            add_bias_and_activate(
+                variant,
+                &biases,
+                columns.iter_mut().map(|column| column.as_mut_slice()),
+            );
 
             for (column, inputs) in columns.iter().zip([first, second]) {
                 for ((actual, x), bias) in column.iter().zip(inputs).zip(biases) {
@@ -493,7 +527,11 @@ mod tests {
     #[should_panic(expected = "a column must hold one value per bias")]
     fn add_bias_and_activate_rejects_a_column_longer_than_the_biases() {
         let mut values = [0.0; 3];
-        add_bias_and_activate(ActivationFunction::Identity, &[1.0, 2.0], [values.as_mut_slice()]);
+        add_bias_and_activate(
+            ActivationFunction::Identity,
+            &[1.0, 2.0],
+            [values.as_mut_slice()],
+        );
     }
 
     #[test]
@@ -507,7 +545,10 @@ mod tests {
     fn leaky_relu_derivative_is_the_leak_at_zero_and_one_just_above() {
         assert_eq!(ActivationFunction::LeakyReLU.derivative(-0.0), 0.01);
         assert_eq!(ActivationFunction::LeakyReLU.derivative(0.0), 0.01);
-        assert_eq!(ActivationFunction::LeakyReLU.derivative(f64::MIN_POSITIVE), 1.0);
+        assert_eq!(
+            ActivationFunction::LeakyReLU.derivative(f64::MIN_POSITIVE),
+            1.0
+        );
     }
 
     /// With `α = 1` both branches of ELU have slope 1 at zero.
@@ -575,7 +616,10 @@ mod tests {
         for function in ActivationFunction::ALL {
             for x in [f64::INFINITY, f64::NEG_INFINITY] {
                 assert!(!function.apply(x).is_nan(), "{function:?}.apply({x})");
-                assert!(!function.derivative(x).is_nan(), "{function:?}.derivative({x})");
+                assert!(
+                    !function.derivative(x).is_nan(),
+                    "{function:?}.derivative({x})"
+                );
             }
         }
     }
@@ -683,4 +727,3 @@ mod tests {
         assert_eq!(ActivationFunction::default(), ActivationFunction::Sigmoid);
     }
 }
-

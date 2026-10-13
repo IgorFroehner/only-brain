@@ -1,9 +1,9 @@
-use std::fmt;
 use nalgebra::{DMatrix, DMatrixView, DMatrixViewMut, DVector, DVectorView, DVectorViewMut};
-use rand::distr::Uniform;
 use rand::Rng;
+use rand::distr::Uniform;
+use std::fmt;
 
-use crate::activation_functions::{add_bias_and_activate, ActivationFunction};
+use crate::activation_functions::{ActivationFunction, add_bias_and_activate};
 
 /// One layer of neurons: a weight per neuron and input, a bias per neuron, and the
 /// activation applied to every neuron.
@@ -24,9 +24,16 @@ pub struct Layer {
 impl Layer {
     /// A layer with weights drawn uniformly from the range `init` gives for its shape,
     /// and zero biases.
-    pub fn random<T: Rng>(neurons: usize, inputs: usize, activation: ActivationFunction, init: crate::Init, rng: &mut T) -> Self {
+    pub fn random<T: Rng>(
+        neurons: usize,
+        inputs: usize,
+        activation: ActivationFunction,
+        init: crate::Init,
+        rng: &mut T,
+    ) -> Self {
         let (low, high) = init.bounds(neurons, inputs);
-        let uniform = Uniform::new(low, high).expect("the initialisation range should be finite and non-empty");
+        let uniform = Uniform::new(low, high)
+            .expect("the initialisation range should be finite and non-empty");
 
         // Drawn input by input, each across every neuron, which is the order the
         // untransposed matrix was filled in, so a seed keeps giving the same network.
@@ -96,7 +103,11 @@ impl Layer {
     /// [`size()`](Self::size) rows, with one column per sample in both. Each call
     /// allocates one copy of this layer's weights in the untransposed layout, for the
     /// matrix product.
-    pub fn forward_batch_into(&self, inputs: DMatrixView<'_, f64>, mut outputs: DMatrixViewMut<'_, f64>) {
+    pub fn forward_batch_into(
+        &self,
+        inputs: DMatrixView<'_, f64>,
+        mut outputs: DMatrixViewMut<'_, f64>,
+    ) {
         // The one allocation: a copy of `W` in its usual layout. `gemm_tr` would skip
         // the copy but computes one dot product per output, which made the 64-128-64-10
         // batch benchmark 85% slower; `gemm` hands products this size to matrixmultiply.
@@ -107,7 +118,9 @@ impl Layer {
         // Each column of the view is contiguous even though the view is not (it is the
         // top rows of a taller matrix), so it can be handed over as a slice. One call
         // covers every column, so the activation is matched once per layer.
-        let columns = outputs.column_iter_mut().map(|column| column.data.into_slice_mut());
+        let columns = outputs
+            .column_iter_mut()
+            .map(|column| column.data.into_slice_mut());
         add_bias_and_activate(self.activation, self.biases.as_slice(), columns);
     }
 
@@ -181,7 +194,10 @@ impl Layer {
 
     pub fn set_biases(&mut self, biases: &[f64]) {
         if biases.len() != self.biases.nrows() {
-            panic!("Incompatible biases vector size: expected {} biases", self.biases.nrows());
+            panic!(
+                "Incompatible biases vector size: expected {} biases",
+                self.biases.nrows()
+            );
         }
         self.biases.copy_from_slice(biases);
     }
@@ -192,7 +208,10 @@ impl Layer {
 
     /// The weights as one row per neuron, each holding one weight per input.
     pub fn weight_rows(&self) -> Vec<Vec<f64>> {
-        self.weights.column_iter().map(|column| column.iter().copied().collect()).collect()
+        self.weights
+            .column_iter()
+            .map(|column| column.iter().copied().collect())
+            .collect()
     }
 
     pub fn biases(&self) -> &DVector<f64> {
@@ -283,7 +302,10 @@ mod tests {
     fn assert_all_close(actual: &[f64], expected: &[f64]) {
         assert_eq!(actual.len(), expected.len());
         for (a, e) in actual.iter().zip(expected) {
-            assert!((a - e).abs() < 1e-12, "expected {expected:?}, got {actual:?}");
+            assert!(
+                (a - e).abs() < 1e-12,
+                "expected {expected:?}, got {actual:?}"
+            );
         }
     }
 
@@ -316,7 +338,10 @@ mod tests {
             for (column, sample) in outputs.column_iter().zip(SAMPLES) {
                 let column: Vec<f64> = column.iter().copied().collect();
                 assert_all_close(&column[..3], &expected(activation, sample));
-                assert!(column[3..].iter().all(|value| value.is_nan()), "{activation:?} wrote past its rows");
+                assert!(
+                    column[3..].iter().all(|value| value.is_nan()),
+                    "{activation:?} wrote past its rows"
+                );
             }
         }
     }

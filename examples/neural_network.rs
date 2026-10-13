@@ -1,4 +1,4 @@
-use only_brain::{dump_model, NeuralNetwork};
+use only_brain::{NeuralNetwork, dump_model};
 
 fn main() {
     let mut nn = NeuralNetwork::<2, 2>::new(&[3]);

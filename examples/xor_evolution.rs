@@ -11,7 +11,7 @@
 //!
 //! Run with `cargo run --example xor_evolution`.
 
-use only_brain::{dump_model, load_model, ActivationFunction, NeuralNetwork};
+use only_brain::{ActivationFunction, NeuralNetwork, dump_model, load_model};
 use rand::rngs::StdRng;
 use rand::seq::IndexedRandom;
 use rand::{Rng, SeedableRng};
@@ -102,7 +102,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let (best_fitness, best) = &scored[0];
         champion.clone_from(best);
         if generation % 25 == 0 || solves_xor(&network(best)) {
-            println!("generation {generation:4}: best mean squared error {:.5}", -best_fitness);
+            println!(
+                "generation {generation:4}: best mean squared error {:.5}",
+                -best_fitness
+            );
         }
         if solves_xor(&network(best)) {
             println!("Solved XOR in generation {generation}");
@@ -110,7 +113,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         // Elites pass unchanged; everyone else is a mutated tournament winner.
-        population = scored[..ELITES].iter().map(|(_, genome)| genome.clone()).collect();
+        population = scored[..ELITES]
+            .iter()
+            .map(|(_, genome)| genome.clone())
+            .collect();
         while population.len() < POPULATION {
             let mut child = tournament(&scored, &mut rng).to_vec();
             mutate(&mut child, &mut rng);

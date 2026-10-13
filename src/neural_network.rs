@@ -1,11 +1,11 @@
+use crate::ModelError;
 use crate::activation_functions::ActivationFunction;
 use crate::init::Init;
 use crate::layer::Layer;
-use crate::ModelError;
 use nalgebra::DMatrix;
-use rand::{rng, Rng};
-use std::fmt;
+use rand::{Rng, rng};
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 /// Neural Network
 ///
@@ -400,7 +400,10 @@ impl<const IN: usize, const OUT: usize> NeuralNetwork<IN, OUT> {
             pre_activations.push(sums);
         }
 
-        Trace { outputs, pre_activations }
+        Trace {
+            outputs,
+            pre_activations,
+        }
     }
 
     /// Returns the number of weights and biases in the network, which is the length of
@@ -885,15 +888,17 @@ impl Trace {
     /// The outputs of the output layer, the same values
     /// [`feed_forward`](NeuralNetwork::feed_forward) returns.
     pub fn output(&self) -> &[f64] {
-        self.outputs.last().expect("a trace always holds the inputs")
+        self.outputs
+            .last()
+            .expect("a trace always holds the inputs")
     }
 }
 
 #[cfg(test)]
 mod trace_tests {
     use super::*;
-    use rand::rngs::StdRng;
     use rand::SeedableRng;
+    use rand::rngs::StdRng;
 
     fn mixed_network() -> NeuralNetwork<3, 2> {
         let mut rng = StdRng::seed_from_u64(11);
@@ -909,8 +914,16 @@ mod trace_tests {
         for input in [[0.0, 0.0, 0.0], [1.0, -2.0, 0.5], [-0.3, 0.7, 4.0]] {
             let trace = nn.feed_forward_trace(&input);
 
-            assert_eq!(trace.output(), &nn.feed_forward(&input), "{context}, input {input:?}");
-            assert_eq!(trace.outputs(trace.num_layers() - 1), trace.output(), "{context}");
+            assert_eq!(
+                trace.output(),
+                &nn.feed_forward(&input),
+                "{context}, input {input:?}"
+            );
+            assert_eq!(
+                trace.outputs(trace.num_layers() - 1),
+                trace.output(),
+                "{context}"
+            );
         }
     }
 
@@ -920,14 +933,18 @@ mod trace_tests {
         // on the heap beyond that, so one network takes each path.
         let paths: [(&[usize], bool); 2] = [(&[5, 4], false), (&[24, 17], true)];
         for (hidden, wider_than_the_stack_scratch) in paths {
-            let mut nn = NeuralNetwork::<3, 2>::new_with_rng(hidden, &mut StdRng::seed_from_u64(11));
+            let mut nn =
+                NeuralNetwork::<3, 2>::new_with_rng(hidden, &mut StdRng::seed_from_u64(11));
             assert_eq!(nn.widest_layer() > 16, wider_than_the_stack_scratch);
 
             for activation in ActivationFunction::ALL {
                 for layer in 1..nn.num_layers() {
                     nn.set_layer_activation(layer, activation);
                 }
-                assert_trace_matches_feed_forward(&nn, &format!("{activation:?}, hidden layers {hidden:?}"));
+                assert_trace_matches_feed_forward(
+                    &nn,
+                    &format!("{activation:?}, hidden layers {hidden:?}"),
+                );
             }
         }
 
@@ -943,7 +960,11 @@ mod trace_tests {
         assert_eq!(trace.outputs(0), &[1.0, -2.0, 0.5]);
         for layer in 1..trace.num_layers() {
             let activation = nn.layer_activation(layer);
-            let expected: Vec<f64> = trace.pre_activations(layer).iter().map(|&x| activation.apply(x)).collect();
+            let expected: Vec<f64> = trace
+                .pre_activations(layer)
+                .iter()
+                .map(|&x| activation.apply(x))
+                .collect();
 
             assert_eq!(trace.pre_activations(layer).len(), nn.layer_size(layer));
             assert_eq!(trace.outputs(layer), expected.as_slice());
@@ -962,7 +983,10 @@ mod trace_tests {
                 let sum: f64 = row.iter().zip(inputs).map(|(w, x)| w * x).sum::<f64>()
                     + nn.layer_biases(layer)[neuron];
                 let traced = trace.pre_activations(layer)[neuron];
-                assert!((traced - sum).abs() < 1e-12, "layer {layer}, neuron {neuron}");
+                assert!(
+                    (traced - sum).abs() < 1e-12,
+                    "layer {layer}, neuron {neuron}"
+                );
             }
         }
     }
@@ -991,15 +1015,18 @@ mod tests {
     use crate::activation_functions::{
         binary_step, elu, identity, leaky_relu, relu, sigmoid, silu, softplus, tanh,
     };
-    use rand::rngs::StdRng;
     use rand::SeedableRng;
+    use rand::rngs::StdRng;
 
     const EPSILON: f64 = 1e-12;
 
     fn assert_all_close(actual: &[f64], expected: &[f64]) {
         assert_eq!(actual.len(), expected.len(), "length mismatch");
         for (i, (a, e)) in actual.iter().zip(expected).enumerate() {
-            assert!((a - e).abs() < EPSILON, "at index {i}: expected {e}, got {a}");
+            assert!(
+                (a - e).abs() < EPSILON,
+                "at index {i}: expected {e}, got {a}"
+            );
         }
     }
 
@@ -1088,7 +1115,11 @@ mod tests {
     #[test]
     fn new_with_the_default_init_matches_new_with_rng() {
         let with_rng = NeuralNetwork::<3, 2>::new_with_rng(&[4, 5], &mut StdRng::seed_from_u64(9));
-        let with_init = NeuralNetwork::<3, 2>::new_with_init(&[4, 5], Init::default(), &mut StdRng::seed_from_u64(9));
+        let with_init = NeuralNetwork::<3, 2>::new_with_init(
+            &[4, 5],
+            Init::default(),
+            &mut StdRng::seed_from_u64(9),
+        );
 
         assert_eq!(with_init, with_rng);
     }
@@ -1097,13 +1128,23 @@ mod tests {
     fn new_with_init_keeps_every_weight_inside_the_layer_range() {
         let mut rng = StdRng::seed_from_u64(3);
 
-        for init in [Init::Xavier, Init::He, Init::Uniform { low: 0.25, high: 0.5 }] {
+        for init in [
+            Init::Xavier,
+            Init::He,
+            Init::Uniform {
+                low: 0.25,
+                high: 0.5,
+            },
+        ] {
             let nn = NeuralNetwork::<6, 2>::new_with_init(&[10], init, &mut rng);
 
             for layer in 1..nn.num_layers() {
                 let (low, high) = init.bounds(nn.layer_size(layer), nn.layer_size(layer - 1));
                 for weight in nn.layer_weights(layer).into_iter().flatten() {
-                    assert!((low..high).contains(&weight), "{init:?}: {weight} outside [{low}, {high})");
+                    assert!(
+                        (low..high).contains(&weight),
+                        "{init:?}: {weight} outside [{low}, {high})"
+                    );
                 }
                 assert!(nn.layer_biases(layer).iter().all(|&bias| bias == 0.0));
             }
@@ -1113,7 +1154,14 @@ mod tests {
     #[test]
     #[should_panic(expected = "low < high")]
     fn new_with_init_rejects_an_empty_uniform_range() {
-        NeuralNetwork::<2, 1>::new_with_init(&[], Init::Uniform { low: 1.0, high: -1.0 }, &mut rand::rng());
+        NeuralNetwork::<2, 1>::new_with_init(
+            &[],
+            Init::Uniform {
+                low: 1.0,
+                high: -1.0,
+            },
+            &mut rand::rng(),
+        );
     }
 
     #[test]
@@ -1133,7 +1181,9 @@ mod tests {
         nn.set_layer_activation(1, ActivationFunction::ReLU);
         nn.set_layer_activation(2, ActivationFunction::Tanh);
 
-        let inputs: Vec<[f64; 3]> = (0..7).map(|i| [i as f64 * 0.3 - 1.0, 0.5, -(i as f64)]).collect();
+        let inputs: Vec<[f64; 3]> = (0..7)
+            .map(|i| [i as f64 * 0.3 - 1.0, 0.5, -(i as f64)])
+            .collect();
 
         let batch = nn.feed_forward_batch(&inputs);
 
@@ -1403,7 +1453,10 @@ mod tests {
 
         assert_eq!(nn.parameter_count(), 11 * 8 + 9 * 3);
         assert_eq!(nn.parameters().len(), nn.parameter_count());
-        assert_eq!(NeuralNetwork::<10, 3>::parameter_count_for(&[8]), nn.parameter_count());
+        assert_eq!(
+            NeuralNetwork::<10, 3>::parameter_count_for(&[8]),
+            nn.parameter_count()
+        );
         assert_eq!(NeuralNetwork::<10, 3>::parameter_count_for(&[]), 11 * 3);
     }
 
@@ -1466,7 +1519,10 @@ mod tests {
             position * 10.0
         });
 
-        assert_eq!(nn.parameters(), vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0]);
+        assert_eq!(
+            nn.parameters(),
+            vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0]
+        );
         assert_eq!(nn.weight(1, 1, 0), 30.0);
         assert_eq!(nn.bias(2, 0), 90.0);
     }
@@ -1489,7 +1545,8 @@ mod tests {
     fn mutating_in_place_matches_the_round_trip_through_the_flat_view() {
         use rand::{Rng, SeedableRng};
         use rand_distr::{Distribution, Normal};
-        let parent = NeuralNetwork::<3, 2>::new_with_rng(&[4, 5], &mut rand::rngs::StdRng::seed_from_u64(7));
+        let parent =
+            NeuralNetwork::<3, 2>::new_with_rng(&[4, 5], &mut rand::rngs::StdRng::seed_from_u64(7));
         let noise = Normal::new(0.0, 0.4).unwrap();
         let mutate = |parameter: &mut f64, rng: &mut rand::rngs::StdRng| {
             if rng.random_bool(0.3) {
@@ -1499,7 +1556,9 @@ mod tests {
 
         let mut rng = rand::rngs::StdRng::seed_from_u64(11);
         let mut genome = parent.parameters();
-        genome.iter_mut().for_each(|parameter| mutate(parameter, &mut rng));
+        genome
+            .iter_mut()
+            .for_each(|parameter| mutate(parameter, &mut rng));
         let mut round_trip = parent.clone();
         round_trip.set_parameters(&genome);
 
@@ -1531,8 +1590,14 @@ mod tests {
 
     #[test]
     fn hidden_layer_sizes_lists_only_hidden_layers() {
-        assert_eq!(NeuralNetwork::<2, 1>::new(&[]).hidden_layer_sizes(), Vec::<usize>::new());
-        assert_eq!(NeuralNetwork::<2, 1>::new(&[5, 3]).hidden_layer_sizes(), vec![5, 3]);
+        assert_eq!(
+            NeuralNetwork::<2, 1>::new(&[]).hidden_layer_sizes(),
+            Vec::<usize>::new()
+        );
+        assert_eq!(
+            NeuralNetwork::<2, 1>::new(&[5, 3]).hidden_layer_sizes(),
+            vec![5, 3]
+        );
     }
 
     /// Fitness functions run in parallel (rayon), which needs Send + Sync.

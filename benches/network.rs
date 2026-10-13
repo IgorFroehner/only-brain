@@ -9,12 +9,12 @@
 //!
 //! Run with `cargo bench`, or `cargo bench -- feed_forward` for one group.
 
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
-use rand::rngs::StdRng;
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 use std::hint::black_box;
 
-use only_brain::{read_model, write_model, ActivationFunction, NeuralNetwork};
+use only_brain::{ActivationFunction, NeuralNetwork, read_model, write_model};
 
 /// A deterministic network, so every run measures the same numbers.
 fn network<const IN: usize, const OUT: usize>(hidden: &[usize]) -> NeuralNetwork<IN, OUT> {
@@ -57,9 +57,10 @@ fn bench_feed_forward_by_activation(c: &mut Criterion) {
     for activation in ActivationFunction::ALL {
         let mut small = network::<16, 4>(&[16, 16]);
         small.set_activation_function(activation);
-        group.bench_function(BenchmarkId::new(format!("{activation:?}"), "16-16-16-4"), |b| {
-            b.iter(|| small.feed_forward(black_box(&inputs)))
-        });
+        group.bench_function(
+            BenchmarkId::new(format!("{activation:?}"), "16-16-16-4"),
+            |b| b.iter(|| small.feed_forward(black_box(&inputs))),
+        );
     }
 
     group.finish();
@@ -71,32 +72,44 @@ fn bench_feed_forward_batch(c: &mut Criterion) {
     const SAMPLES: usize = 256;
 
     let small = network::<16, 4>(&[16, 16]);
-    let small_inputs: Vec<[f64; 16]> = (0..SAMPLES).map(|i| [i as f64 / SAMPLES as f64; 16]).collect();
-    group.bench_function(BenchmarkId::new("loop", format!("16-16-16-4/{SAMPLES}")), |b| {
-        b.iter(|| {
-            black_box(&small_inputs)
-                .iter()
-                .map(|inputs| small.feed_forward(inputs))
-                .collect::<Vec<_>>()
-        })
-    });
-    group.bench_function(BenchmarkId::new("batch", format!("16-16-16-4/{SAMPLES}")), |b| {
-        b.iter(|| small.feed_forward_batch(black_box(&small_inputs)))
-    });
+    let small_inputs: Vec<[f64; 16]> = (0..SAMPLES)
+        .map(|i| [i as f64 / SAMPLES as f64; 16])
+        .collect();
+    group.bench_function(
+        BenchmarkId::new("loop", format!("16-16-16-4/{SAMPLES}")),
+        |b| {
+            b.iter(|| {
+                black_box(&small_inputs)
+                    .iter()
+                    .map(|inputs| small.feed_forward(inputs))
+                    .collect::<Vec<_>>()
+            })
+        },
+    );
+    group.bench_function(
+        BenchmarkId::new("batch", format!("16-16-16-4/{SAMPLES}")),
+        |b| b.iter(|| small.feed_forward_batch(black_box(&small_inputs))),
+    );
 
     let medium = network::<64, 10>(&[128, 64]);
-    let medium_inputs: Vec<[f64; 64]> = (0..SAMPLES).map(|i| [i as f64 / SAMPLES as f64; 64]).collect();
-    group.bench_function(BenchmarkId::new("loop", format!("64-128-64-10/{SAMPLES}")), |b| {
-        b.iter(|| {
-            black_box(&medium_inputs)
-                .iter()
-                .map(|inputs| medium.feed_forward(inputs))
-                .collect::<Vec<_>>()
-        })
-    });
-    group.bench_function(BenchmarkId::new("batch", format!("64-128-64-10/{SAMPLES}")), |b| {
-        b.iter(|| medium.feed_forward_batch(black_box(&medium_inputs)))
-    });
+    let medium_inputs: Vec<[f64; 64]> = (0..SAMPLES)
+        .map(|i| [i as f64 / SAMPLES as f64; 64])
+        .collect();
+    group.bench_function(
+        BenchmarkId::new("loop", format!("64-128-64-10/{SAMPLES}")),
+        |b| {
+            b.iter(|| {
+                black_box(&medium_inputs)
+                    .iter()
+                    .map(|inputs| medium.feed_forward(inputs))
+                    .collect::<Vec<_>>()
+            })
+        },
+    );
+    group.bench_function(
+        BenchmarkId::new("batch", format!("64-128-64-10/{SAMPLES}")),
+        |b| b.iter(|| medium.feed_forward_batch(black_box(&medium_inputs))),
+    );
 
     group.finish();
 }
@@ -127,7 +140,9 @@ fn bench_parameters(c: &mut Criterion) {
         let mut nn = small.clone();
         b.iter(|| {
             let mut genome = black_box(&nn).parameters();
-            genome.iter_mut().for_each(|parameter| *parameter = -*parameter);
+            genome
+                .iter_mut()
+                .for_each(|parameter| *parameter = -*parameter);
             nn.set_parameters(&genome);
         })
     });

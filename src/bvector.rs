@@ -3,13 +3,16 @@
 
 use std::ops;
 
-use nalgebra::{SimdRealField, SVector};
+use nalgebra::{SVector, SimdRealField};
 
 /// A vector with a compile-time dimension, once the input type of [`crate::Perceptron`].
 ///
 /// Deprecated: [`crate::Perceptron`] now takes plain arrays, so `bvector![a, b]` becomes
 /// `[a, b]`. An existing `BVector` converts with `.into()`.
-#[deprecated(since = "0.5.0", note = "use a plain array `[T; N]`, which `Perceptron` now takes; convert an existing `BVector` with `.into()`")]
+#[deprecated(
+    since = "0.5.0",
+    note = "use a plain array `[T; N]`, which `Perceptron` now takes; convert an existing `BVector` with `.into()`"
+)]
 #[derive(Debug, Clone, PartialEq)]
 pub struct BVector<T: SimdRealField + Copy, const N: usize> {
     data_vector: SVector<T, N>,
@@ -84,7 +87,6 @@ macro_rules! bvector {
     };
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -123,7 +125,10 @@ mod tests {
 
     #[test]
     fn add_is_element_wise() {
-        assert_eq!(bvector![1.0, 2.0] + bvector![0.5, -3.0], bvector![1.5, -1.0]);
+        assert_eq!(
+            bvector![1.0, 2.0] + bvector![0.5, -3.0],
+            bvector![1.5, -1.0]
+        );
     }
 
     #[test]

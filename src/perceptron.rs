@@ -1,7 +1,7 @@
-use crate::{activation_functions::ActivationFunction, init::Init, ModelError, NeuralNetwork};
+use crate::{ModelError, NeuralNetwork, activation_functions::ActivationFunction, init::Init};
 use nalgebra::SVectorView;
-use rand::distr::Uniform;
 use rand::Rng;
+use rand::distr::Uniform;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -164,7 +164,8 @@ impl<const N: usize> Perceptron<N> {
         let weights = SVectorView::<f64, N>::from_slice(&self.weights);
         let inputs = SVectorView::<f64, N>::from_slice(inputs);
 
-        self.activation_function.apply(weights.dot(&inputs) + self.bias)
+        self.activation_function
+            .apply(weights.dot(&inputs) + self.bias)
     }
 }
 
@@ -201,7 +202,12 @@ impl<const N: usize> From<Perceptron<N>> for NeuralNetwork<N, 1> {
     /// ```
     fn from(perceptron: Perceptron<N>) -> Self {
         // Flat parameter order: the weights of the one neuron, then its bias.
-        let parameters: Vec<f64> = perceptron.weights.iter().copied().chain([perceptron.bias]).collect();
+        let parameters: Vec<f64> = perceptron
+            .weights
+            .iter()
+            .copied()
+            .chain([perceptron.bias])
+            .collect();
 
         let mut network = NeuralNetwork::from_parameters(&[], &parameters);
         network.set_activation_function(perceptron.activation_function);
@@ -225,11 +231,12 @@ impl<const N: usize> TryFrom<PerceptronData> for Perceptron<N> {
     /// Checks that there is one weight per input.
     fn try_from(data: PerceptronData) -> Result<Self, Self::Error> {
         let found = data.weights.len();
-        let weights = <[f64; N]>::try_from(data.weights).map_err(|_| ModelError::DimensionMismatch {
-            end: "input",
-            expected: N,
-            found,
-        })?;
+        let weights =
+            <[f64; N]>::try_from(data.weights).map_err(|_| ModelError::DimensionMismatch {
+                end: "input",
+                expected: N,
+                found,
+            })?;
 
         Ok(Self {
             weights,
@@ -256,8 +263,8 @@ impl<const N: usize> fmt::Display for Perceptron<N> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::rngs::StdRng;
     use rand::SeedableRng;
+    use rand::rngs::StdRng;
 
     const EPSILON: f64 = 1e-12;
 
@@ -292,7 +299,12 @@ mod tests {
         or_gate.set_weights([1.0, 1.0]);
         or_gate.set_bias(-0.5);
 
-        for (inputs, expected) in [([0.0, 0.0], 0.0), ([0.0, 1.0], 1.0), ([1.0, 0.0], 1.0), ([1.0, 1.0], 1.0)] {
+        for (inputs, expected) in [
+            ([0.0, 0.0], 0.0),
+            ([0.0, 1.0], 1.0),
+            ([1.0, 0.0], 1.0),
+            ([1.0, 1.0], 1.0),
+        ] {
             assert_eq!(or_gate.feed_forward(&inputs), expected, "OR{inputs:?}");
         }
     }
@@ -311,13 +323,22 @@ mod tests {
 
     #[test]
     fn the_default_perceptron_is_a_zero_sigmoid() {
-        assert_eq!(Perceptron::<2>::default(), Perceptron::<2>::new(ActivationFunction::Sigmoid));
+        assert_eq!(
+            Perceptron::<2>::default(),
+            Perceptron::<2>::new(ActivationFunction::Sigmoid)
+        );
     }
 
     #[test]
     fn new_with_rng_is_reproducible_and_matches_a_network_without_hidden_layers() {
-        let first = Perceptron::<4>::new_with_rng(ActivationFunction::Sigmoid, &mut StdRng::seed_from_u64(5));
-        let second = Perceptron::<4>::new_with_rng(ActivationFunction::Sigmoid, &mut StdRng::seed_from_u64(5));
+        let first = Perceptron::<4>::new_with_rng(
+            ActivationFunction::Sigmoid,
+            &mut StdRng::seed_from_u64(5),
+        );
+        let second = Perceptron::<4>::new_with_rng(
+            ActivationFunction::Sigmoid,
+            &mut StdRng::seed_from_u64(5),
+        );
         let network = NeuralNetwork::<4, 1>::new_with_rng(&[], &mut StdRng::seed_from_u64(5));
 
         assert_eq!(first, second);
@@ -326,18 +347,25 @@ mod tests {
 
     #[test]
     fn a_perceptron_converts_to_an_equivalent_network() {
-        let mut perceptron = Perceptron::<3>::new_with_rng(ActivationFunction::Tanh, &mut StdRng::seed_from_u64(11));
+        let mut perceptron =
+            Perceptron::<3>::new_with_rng(ActivationFunction::Tanh, &mut StdRng::seed_from_u64(11));
         perceptron.set_bias(0.2);
 
         let network = NeuralNetwork::from(perceptron.clone());
 
         assert_eq!(network.num_layers(), 2);
         assert_eq!(network.layer_activation(1), ActivationFunction::Tanh);
-        assert_eq!(network.layer_weights(1), vec![perceptron.weights().to_vec()]);
+        assert_eq!(
+            network.layer_weights(1),
+            vec![perceptron.weights().to_vec()]
+        );
         assert_eq!(network.layer_biases(1), &[0.2]);
         for inputs in [[0.0, 0.0, 0.0], [1.0, -2.0, 0.5], [-0.3, 0.7, 4.0]] {
             let [output] = network.feed_forward(&inputs);
-            assert!((output - perceptron.feed_forward(&inputs)).abs() < EPSILON, "{inputs:?}");
+            assert!(
+                (output - perceptron.feed_forward(&inputs)).abs() < EPSILON,
+                "{inputs:?}"
+            );
         }
     }
 
@@ -366,7 +394,10 @@ mod tests {
         perceptron.set_bias(0.1);
 
         let json = serde_json::to_string(&perceptron).unwrap();
-        assert_eq!(json, r#"{"activation":"BinaryStep","weights":[0.5,-0.25],"bias":0.1}"#);
+        assert_eq!(
+            json,
+            r#"{"activation":"BinaryStep","weights":[0.5,-0.25],"bias":0.1}"#
+        );
 
         let back: Perceptron<2> = serde_json::from_str(&json).unwrap();
         assert_eq!(back, perceptron);
@@ -378,7 +409,12 @@ mod tests {
 
         let error = serde_json::from_str::<Perceptron<2>>(json).unwrap_err();
 
-        assert!(error.to_string().contains("3 input neurons but 2 were expected"), "{error}");
+        assert!(
+            error
+                .to_string()
+                .contains("3 input neurons but 2 were expected"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -387,7 +423,12 @@ mod tests {
 
         let error = serde_json::from_str::<Perceptron<2>>(json).unwrap_err();
 
-        assert!(error.to_string().contains("1 input neurons but 2 were expected"), "{error}");
+        assert!(
+            error
+                .to_string()
+                .contains("1 input neurons but 2 were expected"),
+            "{error}"
+        );
     }
 
     #[test]
