@@ -93,7 +93,9 @@ impl Layer {
     /// column of `outputs`.
     ///
     /// `inputs` must have [`inputs()`](Self::inputs) rows and `outputs`
-    /// [`size()`](Self::size) rows, with one column per sample in both.
+    /// [`size()`](Self::size) rows, with one column per sample in both. Each call
+    /// allocates one copy of this layer's weights in the untransposed layout, for the
+    /// matrix product.
     pub fn forward_batch_into(&self, inputs: DMatrixView<'_, f64>, mut outputs: DMatrixViewMut<'_, f64>) {
         // The one allocation: a copy of `W` in its usual layout. `gemm_tr` would skip
         // the copy but computes one dot product per output, which made the 64-128-64-10
@@ -139,8 +141,8 @@ impl Layer {
     /// [`forward_into`](Self::forward_into) adds the biases in the same loop as the
     /// activation, and [`pre_activations_into`](Self::pre_activations_into) adds them
     /// on their own; both add each bias to the same product, so the trace stays
-    /// bit-identical to `feed_forward`. It is forced inline so `forward_into`, the per-sample hot path,
-    /// keeps the product and the activation loop in one function.
+    /// bit-identical to `feed_forward`. It is forced inline so `forward_into`, the
+    /// per-sample hot path, keeps the product and the activation loop in one function.
     #[inline(always)]
     fn weighted_inputs_into(&self, inputs: &[f64], sums: &mut [f64]) {
         let inputs = DVectorView::from_slice(inputs, self.inputs());

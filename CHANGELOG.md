@@ -93,11 +93,15 @@ names; in-place parameter mutation, and weights stored in the flat parameter ord
   and `read_model` 34%. `feed_forward` is 26% faster on a 4-6-2 network, 21% on a
   16-16-16-4 network and 17% on a 64-128-64-10 network. `feed_forward_batch` is
   unchanged within noise (-1% on 16-16-16-4, +3% on 64-128-64-10, for 256 inputs):
-  it multiplies by a transposed copy of each layer's weights, because nalgebra's
-  transposed product does not use its fast matrix multiplication and was 85% slower
-  on the larger network. Numbers are the best of four alternating runs against the
-  previous layout. The flat parameter order, the model file format and the weights
-  `new` and `new_with_rng` draw for a seed are unchanged.
+  it copies each layer's weights back to the untransposed layout on every call and
+  multiplies by the copy, because nalgebra's transposed product does not use its
+  fast matrix multiplication and was 85% slower on the larger network. Numbers are
+  the best of four alternating runs against the previous layout. The flat parameter
+  order, the model file format and the weights `new` and `new_with_rng` draw for a
+  seed are unchanged. `feed_forward`'s outputs can differ from 0.4.0's in the last
+  bits when a layer has 8 or more inputs, because nalgebra now sums each neuron's
+  products as a dot product with 8 running sums; `feed_forward_trace` is still
+  bit-identical to `feed_forward`.
 
 ### Fixed
 

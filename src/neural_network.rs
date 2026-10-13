@@ -1065,17 +1065,24 @@ mod tests {
     /// is what seeded experiments and saved fixtures rely on.
     #[test]
     fn new_with_rng_draws_the_same_weights_as_before_init_existed() {
-        let nn = NeuralNetwork::<2, 1>::new_with_rng(&[2], &mut StdRng::seed_from_u64(42));
+        // A non-square hidden layer, so swapping its neuron and input counts shows up.
+        let nn = NeuralNetwork::<2, 1>::new_with_rng(&[3], &mut StdRng::seed_from_u64(42));
 
         // What 0.4.0 did: draw from `Uniform::new(-1.0, 1.0)` directly.
         let mut rng = StdRng::seed_from_u64(42);
         let uniform = rand::distr::Uniform::new(-1.0f64, 1.0).unwrap();
         let mut draw = || rng.sample(uniform);
-        // nalgebra fills each weight matrix column by column.
-        let (w00, w10, w01, w11) = (draw(), draw(), draw(), draw());
-        let (o00, o01) = (draw(), draw());
+        // 0.4.0 filled each `neurons × inputs` matrix column by column: input by
+        // input, each across every neuron. `wNI` is neuron N's weight for input I.
+        let (w00, w10, w20, w01, w11, w21) = (draw(), draw(), draw(), draw(), draw(), draw());
+        let (o00, o01, o02) = (draw(), draw(), draw());
 
-        assert_eq!(nn.parameters(), vec![w00, w01, w10, w11, 0.0, 0.0, o00, o01, 0.0]);
+        #[rustfmt::skip]
+        let expected = vec![
+            w00, w01, w10, w11, w20, w21, 0.0, 0.0, 0.0,
+            o00, o01, o02, 0.0,
+        ];
+        assert_eq!(nn.parameters(), expected);
     }
 
     #[test]
