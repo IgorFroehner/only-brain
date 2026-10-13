@@ -6,6 +6,8 @@ Plain arrays at the whole boundary and a `Perceptron` on par with `NeuralNetwork
 what backpropagation needs (a traced forward pass and activation derivatives); four
 new activation functions and a `softmax` helper; scaled initialisation and tidier
 names; in-place parameter mutation, and weights stored in the flat parameter order.
+The minimum supported Rust version, 1.88, is now declared, and the crate moves to
+the 2024 edition.
 
 ### Added
 
@@ -102,6 +104,13 @@ names; in-place parameter mutation, and weights stored in the flat parameter ord
   bits when a layer has 8 or more inputs, because nalgebra now sums each neuron's
   products as a dot product with 8 running sums; `feed_forward_trace` is still
   bit-identical to `feed_forward`.
+- The minimum supported Rust version is declared as 1.88 (`rust-version` in
+  `Cargo.toml`), and CI tests that toolchain. 0.4.0 already needed 1.88, because it
+  uses `slice::as_chunks`, so nothing that built before stops building. An older
+  toolchain now gets Cargo's message that the crate requires rustc 1.88 instead of
+  a compile error inside the crate.
+- The crate uses the 2024 edition, which needs Rust 1.85 or newer and so is covered
+  by the 1.88 minimum. It changes nothing in the public API.
 
 ### Fixed
 
