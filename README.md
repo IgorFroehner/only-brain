@@ -187,7 +187,25 @@ assert_eq!(nn.parameters(), genome);
 ```
 
 `set_parameters` updates an existing network in place and keeps its activation
-functions, which are part of the shape rather than the parameters.
+functions, which are part of the shape rather than the parameters. To mutate a
+network without copying its parameters out and back, `for_each_parameter_mut` and
+`map_parameters` visit them in place, in the same order:
+
+```rust
+use only_brain::NeuralNetwork;
+use rand::Rng;
+
+let mut nn = NeuralNetwork::<10, 3>::new(&[8]);
+let mut rng = rand::rng();
+
+// Nudge about one parameter in ten.
+nn.for_each_parameter_mut(|parameter| {
+    if rng.random_bool(0.1) {
+        *parameter += rng.random_range(-0.1..0.1);
+    }
+});
+```
+
 `NeuralNetwork` is `Send + Sync`, so a population can be scored in parallel. See
 [`examples/xor_evolution.rs`](https://github.com/IgorFroehner/only-brain/blob/main/examples/xor_evolution.rs)
 for a complete, seeded neuroevolution run.

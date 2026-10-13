@@ -207,11 +207,10 @@ pub fn write_model<const IN: usize, const OUT: usize>(
     for layer in layers {
         bytes.extend_from_slice(&format_count(layer.size()).to_le_bytes());
         bytes.push(layer.activation().code());
-        // The weights row by row, then the biases: the flat parameter view.
-        for row in layer.weights().row_iter() {
-            for value in &row {
-                bytes.extend_from_slice(&value.to_le_bytes());
-            }
+        // The weights row by row, then the biases: the flat parameter view, which is
+        // also the order the layer stores its weights in.
+        for value in layer.flat_weights() {
+            bytes.extend_from_slice(&value.to_le_bytes());
         }
         for value in layer.biases() {
             bytes.extend_from_slice(&value.to_le_bytes());
