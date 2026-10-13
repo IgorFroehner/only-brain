@@ -1345,6 +1345,7 @@ mod tests {
     }
 
     /// A 2 -> 2 -> 1 network whose every parameter is distinct, so a wrong order shows.
+    #[rustfmt::skip]
     fn numbered_network() -> NeuralNetwork<2, 1> {
         let mut nn = NeuralNetwork::<2, 1>::new(&[2]);
         nn.set_layer_weights(1, &[[1.0, 2.0],
