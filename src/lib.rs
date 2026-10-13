@@ -1,9 +1,20 @@
 //! # Only Brain
 //!
-//! A very simple Neural Network library built in Rust with the objective to allow
-//! the user to create, manipulate and train a neural network directly. The user has
-//! direct access to weights and biases of the network, allowing them to implement
-//! their own training and manipulation methods.
+//! A small feed-forward neural network library for Rust, **without the learning part**.
+//!
+//! Only Brain gives you the network: fully connected layers, an activation function
+//! per layer, a forward pass, and direct access to every weight and bias. How those
+//! weights are found is up to you. Backpropagation, a genetic algorithm, random search
+//! or a formula on a napkin all work, because the library never hides the numbers.
+//!
+//! - **Shape in the type.** [`NeuralNetwork<IN, OUT>`](NeuralNetwork) makes a wrongly
+//!   sized input a compile error. Hidden layers are chosen at runtime.
+//! - **Plain data at the boundary.** Weights and biases go in and out as arrays,
+//!   slices and `Vec`s. You never touch a matrix type.
+//! - **Two views of the same network.** Read and write it layer by layer, or as one
+//!   flat list of parameters for black-box search.
+//! - **Stable on disk.** A small, versioned binary format with no serialization
+//!   dependency, plus serde for everything else. Old files keep loading.
 //!
 //! # Example
 //!
@@ -44,6 +55,9 @@
 //!   [`NeuralNetwork::from_parameters`], for methods that search a list of numbers,
 //!   such as genetic algorithms. A genome of
 //!   [`NeuralNetwork::parameter_count_for`] genes is a network.
+//!   [`NeuralNetwork::for_each_parameter_mut`] and [`NeuralNetwork::map_parameters`]
+//!   visit the same parameters in place, in the same order, to mutate a network
+//!   without copying its parameters out and back.
 //!
 //! ```
 //! use only_brain::{ActivationFunction, NeuralNetwork};
@@ -62,9 +76,13 @@
 //! println!("fitness: {}", fitness(&genome));
 //! ```
 //!
-//! Each layer has its own [`ActivationFunction`], and [`dump_model`] and
-//! [`load_model`] save and load networks in a versioned format that keeps reading
-//! files written by earlier versions.
+//! Each layer has its own [`ActivationFunction`]: sigmoid (the default), tanh, ReLU,
+//! leaky ReLU, ELU, softplus, SiLU, binary step or identity. Softmax depends on the
+//! whole layer, so it is not one of them: [`softmax`] and [`argmax`] turn an
+//! `Identity` output layer's values into probabilities and a class.
+//! [`NeuralNetwork::feed_forward_batch`] runs many inputs as one matrix product per
+//! layer. [`dump_model`] and [`load_model`] save and load networks in a versioned
+//! format that keeps reading files written by earlier versions.
 //!
 //! [`NeuralNetwork::new`] draws weights uniformly from `[-1, 1)`;
 //! [`NeuralNetwork::new_with_init`] takes an [`Init`] that scales the range to each
@@ -85,6 +103,8 @@
 //!
 //! assert_eq!(or_gate.feed_forward(&[0.0, 1.0]), 1.0);
 //! ```
+#![warn(missing_docs)]
+
 mod activation_functions;
 mod layer;
 mod neural_network;

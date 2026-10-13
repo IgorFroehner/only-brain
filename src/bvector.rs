@@ -36,10 +36,12 @@ impl<T: SimdRealField + Copy, const N: usize> BVector<T, N> {
         }
     }
 
+    /// The dot product of the two vectors: the sum of their elementwise products.
     pub fn dot(&self, other: &Self) -> T {
         self.data_vector.dot(&other.data_vector)
     }
 
+    /// The number of elements, `N`.
     pub fn len(&self) -> usize {
         N
     }
@@ -49,6 +51,11 @@ impl<T: SimdRealField + Copy, const N: usize> BVector<T, N> {
         N == 0
     }
 
+    /// The element at `index`.
+    ///
+    /// # Panics
+    ///
+    /// Panics with "Index out of bounds" if `index` is `N` or more.
     pub fn get(&self, index: usize) -> T {
         assert!(index < N, "Index out of bounds");
         self.data_vector[index]
