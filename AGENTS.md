@@ -1,166 +1,151 @@
 # AGENTS.md
 
 This file provides guidance to AI coding agents (Claude Code, Codex and others) when
-working with code in this repository.
+working with code in this repository. Read `README.md` too: it is the user-facing
+statement of the design, and it is compiled as tests.
 
 ## What this is
 
-`only-brain` is a Rust library crate: a feed-forward neural network "without the
-learning part". It exposes a network's weights and biases so users bring their own
-training. The main consumer is neuroevolution: the flat parameter view exists so a
-genetic algorithm (the sibling `evolutionary` crate, see `ideas/racelearn.md`) can
-treat a network as a `Vec<f64>` genome. Keep that use case fast and the API plain.
+`only-brain` is a Rust library crate: a small feed-forward neural network **without
+the learning part**. It provides fully connected layers, one activation function per
+layer, a forward pass, and direct access to every weight and bias. How the weights are
+found (backpropagation, a genetic algorithm, random search) is the user's business, so
+the library never hides the numbers.
 
-## Commands
+The main consumer is neuroevolution, where a genetic algorithm treats a whole network
+as a `Vec<f64>` genome. Keep that use case fast and the API plain.
 
-```sh
-cargo test --all-targets                        # unit + integration tests, builds examples and benches
-cargo test --doc                                # doctests, including README.md (see below)
-cargo test --test model_io                      # one integration test file
-cargo test --test model_io a_legacy_file_loads  # one integration test
-cargo test feed_forward                         # unit tests matching a name
-cargo clippy --all-targets -- -D warnings       # CI fails on any warning
-cargo fmt --check                               # CI fails on unformatted code, here and in fuzz/
-RUSTDOCFLAGS="-D warnings" cargo doc --no-deps  # CI fails on broken intra-doc links
-cargo bench                                     # criterion; `cargo bench -- feed_forward` for one group
-cargo run --example xor_evolution               # end-to-end check of the flat parameter view, run in CI
-cargo run --example iris_backprop               # end-to-end check of backprop through the public API, run in CI
-cargo publish --dry-run                         # CI packages the crate on every push
-cargo +1.88 test --all-targets                  # the MSRV; CI also runs `cargo +1.88 test --doc`
-cargo +nightly fuzz run read_model              # needs cargo-fuzz; CI runs each fuzz target for 60 s
-```
+## Design principles
 
-CI (`.github/workflows/ci.yml`) runs exactly these, plus `cargo semver-checks`
-against the latest crates.io release. Run the test, clippy, fmt and doc commands
-before considering a change done.
+Every change should fit these. They come from the README and are what the API
+promises.
 
-The crate is edition 2024 with `rust-version = "1.88"` (the first release with
-`slice::as_chunks` and let chains). Raising it is a changelog entry, and the MSRV job
-in CI pins the same version, so change both. The semver job only warns about reported
-breaks while `Cargo.toml` says 0.4.0, because 0.5.0's breaks are deliberate (a tool
-failure still fails it); from the 0.5.0 version bump on, a reported break fails it,
-so a breaking change needs a minor (0.x) version bump.
+1. **No training in the crate.** Do not add optimizers, loss functions or training
+   loops. Add the *access* a training method needs instead: `feed_forward_trace`
+   (per-layer pre-activations and outputs) and `ActivationFunction::derivative` exist
+   so users can write backprop themselves, as `examples/iris_backprop.rs` does.
+2. **Shape in the type.** `NeuralNetwork<IN, OUT>` makes a wrongly sized input or
+   output a compile error. Hidden layer sizes are chosen at runtime.
+3. **Plain data at the boundary.** Every public method takes and returns arrays,
+   slices and `Vec`s. nalgebra is an internal detail and must never appear in the
+   public API.
+4. **Two views of the same network.** Layer by layer (`layer_weights`,
+   `set_layer_weights`, `weight`, `set_bias`, ...) for methods that reason about
+   layers, and one flat parameter list (`parameters`, `from_parameters`,
+   `set_parameters`, `for_each_parameter_mut`, `map_parameters`) for black-box search.
+   Both must stay consistent and cheap.
+5. **Stable on disk.** A small, versioned binary format with no serialization
+   dependency, plus serde for everything else. Files written by any earlier version
+   keep loading.
+6. **Errors vs. panics.** IO and deserialization return `ModelError`. In-memory
+   misuse (bad layer index, wrong shape passed to a setter) panics, matching the
+   direct-access design. Model readers must never panic on any input.
 
-## Things that are easy to break
+## Contracts that must not change
 
-- **README.md is compiled as doctests.** `src/lib.rs` includes it via
-  `#[doc = include_str!("../README.md")]` under `cfg(doctest)`. Every fenced block
-  without a language tag is treated as Rust and must compile. Tag shell or other
-  non-Rust blocks (` ```sh `, ` ```text `). Dev-dependencies such as `serde_json`
-  are available there.
-- **The flat parameter order is a contract.** Layer by layer, each layer's weights
-  row by row (one row per neuron, columns in previous-layer order), then biases. It
-  is documented on `NeuralNetwork`, it is the genome layout for GA users, and it is
-  byte-for-byte the model file layout. Never change it.
-- **The model file format is frozen per version.** `src/io.rs` documents it: magic
-  `ONLYBRN\0`, `u16` version, then layers. `ActivationFunction::code()` values are
-  part of the format: new variants get new codes appended, existing ones never move,
-  and `ActivationFunction::ALL` must list every variant. Adding a format version means
-  keeping `read_v1` and every older reader. `tests/fixtures/v0_1_model.bin` and
-  `v1_model.bin` guard this.
-- **Pre-0.3 files have no magic.** `src/io/legacy.rs` decodes the old bincode 1 /
-  nalgebra layout by hand (column-major weights, network-wide activation). The
-  `bincode` dev-dependency exists only so tests can write such files.
-- **Published crate contents are an allowlist.** `Cargo.toml` `include` ships only
-  `src`, `Cargo.toml`, `README.md`, `CHANGELOG.md` and `LICENSE`. Examples, tests,
-  benches and `fuzz/` are not published, so README links to them must be absolute
-  GitHub URLs, not relative paths.
-- **The model readers must never panic.** `fuzz/` is a separate cargo-fuzz package
-  (its own `Cargo.toml` and lockfile, not a workspace member) with two targets:
-  `read_model` (arbitrary bytes, seeded from `tests/fixtures`, and whatever loads
-  must round-trip) and `mutated_model` (a valid model with corrupted or truncated
-  bytes). A crash it finds is a reader bug: fix it and add the input as a regression
-  test in `tests/model_io.rs`.
-- **`#![warn(missing_docs)]` is on**, and clippy's `-D warnings` makes it an error,
-  so every public item needs rustdoc.
-- **Hand-aligned weight matrices** (one row per line) in code are marked
-  `#[rustfmt::skip]` on the statement or function; rustfmt leaves doc comments
-  alone, so doc examples need nothing.
+- **Layer numbering.** Layer 0 is the input layer in every public index. It has no
+  weights and is not stored, so the first layer with weights is layer 1, and
+  `num_layers()` counts the input layer. `Trace` uses the same numbering
+  (`outputs(0)` is the inputs).
+- **The flat parameter order.** Layer by layer, each layer's weights row by row (one
+  row per neuron, one column per neuron of the previous layer), then that layer's
+  biases. It is documented on `NeuralNetwork`, it is the genome layout GA users rely
+  on, and it is exactly the model file layout. Never change it.
+- **The model file format** is documented in `src/io.rs`: magic `ONLYBRN\0`, a `u16`
+  version, then the layers. `ActivationFunction::code()` values are part of it: new
+  variants get new codes appended, existing codes never move, and
+  `ActivationFunction::ALL` lists every variant. A new format version keeps every
+  older reader. Pre-0.3 files have no magic and are decoded by hand in
+  `src/io/legacy.rs` (the `bincode` dev-dependency exists only to write such files in
+  tests). `tests/fixtures/*.bin` guard all of this.
+- **Seeded initialization is reproducible.** `new` and `new_with_rng` draw from
+  `Init::default()` (`[-1, 1)`), and their output for a given seed must never change.
 
 ## Architecture
 
 All modules are private and re-exported flat from `src/lib.rs`, so the public API is
 `only_brain::{NeuralNetwork, Trace, ActivationFunction, softmax, argmax, Init,
 Perceptron, dump_model, load_model, write_model, read_model, ModelError,
-MODEL_FORMAT_VERSION}`, plus the deprecated `BVector` and `bvector!`. `src/lib.rs`
-re-exports `activation_functions` by name: the plain `fn(f64) -> f64` functions there
-are `pub(crate)`, and a public helper function added to that module must also be
-listed in that `pub use`.
+MODEL_FORMAT_VERSION}`, plus the deprecated `BVector` and `bvector!`. A new public
+helper in `activation_functions.rs` must be added to its `pub use` in `src/lib.rs`.
 
-- `src/neural_network.rs`: `NeuralNetwork<IN, OUT>` is a `Vec<Layer>`. The input
-  layer is **layer 0** in every public index, has no weights, and is not stored.
-  Public layer `n` maps to `self.layers[n - 1]`, and layer 0 panics with
-  `"Invalid layer index"`. `num_layers()` counts the input layer. Setters panic on
-  shape mismatch with messages the unit tests assert on (`"Incompatible weights
-  matrix size"`, `"Incompatible biases vector size"`, `"at least one neuron"`).
-  `Trace`, returned by `feed_forward_trace`, lives here too and uses the same layer
-  numbering: `outputs(0)` is the inputs, `pre_activations(0)` panics.
-- `src/layer.rs`: `Layer` holds a nalgebra `DMatrix` of weights and a `DVector` of
-  biases. **The weights are stored transposed**, `inputs × neurons` (one column per
-  neuron), so nalgebra's column-major memory is exactly the flat row-per-neuron
-  order: `extend_parameters`, `take_parameters`, `for_each_parameter_mut` and the
-  writer in `src/io.rs` (through `flat_weights()`) work on one contiguous slice.
-  Index the matrix as `weights[(input, neuron)]`; every `Layer` method still takes
-  and returns weights row per neuron (`from_parts`, `set_weights`, `weight_rows`,
-  `weight(neuron, input)`), and nalgebra never crosses the public boundary: every
-  public method takes and returns arrays, slices or `Vec`s. `Layer::random` fills
-  the matrix with `from_row_iterator` so the draws keep the order the untransposed
-  `from_fn` used, which `new_with_rng_draws_the_same_weights_as_before_init_existed`
-  guards. `forward_into` is the allocation-free hot path that `feed_forward` calls
-  once per layer with a single scratch buffer per call (on the stack when the widest
-  layer has at most 16 neurons, which a benchmark showed beats a larger stack
-  buffer). `forward_batch_into` is its `gemm` counterpart behind
-  `feed_forward_batch`, one column per sample; it multiplies by a transposed copy of
-  the weights, because nalgebra's `gemm_tr` does not use matrixmultiply (85% slower
-  on the 64-128-64-10 batch benchmark) and a swapped-stride view of the storage
-  trips an out-of-bounds read in nalgebra's small-matrix `gemm` path.
-  `pre_activations_into` computes `W·x + b` without the activation, for
-  `feed_forward_trace`. Both it and `forward_into` go through the private
-  `weighted_inputs_into`, the one copy of the single-sample product (`gemv_tr` on
-  the stored `Wᵀ`, so `W·x`, no biases). That helper is `#[inline(always)]` because
-  a plain `#[inline]` was not honoured and the extra call slowed the 4-6-2
-  benchmark. The biases are added after it: `forward_into` and `forward_batch_into`
-  add them in the same loop as the activation (`add_bias_and_activate`, below),
-  `pre_activations_into` on their own. Each bias is added to the same product either
-  way, so the trace stays bit-identical to `feed_forward`. `extend_parameters` /
-  `take_parameters` define the flat order.
-- **`NetworkData` / `LayerData` are the single validation funnel.** They are the
-  serde form of a network (`{"layers": [{"activation", "weights", "biases"}]}`).
-  `NeuralNetwork` is `#[serde(into = "NetworkData", try_from = "NetworkData")]`, and
-  both file readers (`read_v1`, `legacy::read`) produce a `NetworkData` and go through
-  the same `TryFrom`. That is where layers are checked against each other and against
-  `IN`/`OUT`. Any new way of building a network from untrusted data should go
-  through it rather than re-implementing the checks.
-- `src/io.rs`: file format, `ModelError` (`thiserror`, `#[non_exhaustive]`), the
-  `Decoder` that reads little-endian values in bounded chunks so a corrupted length
-  cannot exhaust memory. `load_model` additionally requires the file to end where the
-  model ends; `read_model` leaves trailing data unread so several models can share a
-  stream.
-- `src/activation_functions.rs`: `ActivationFunction` enum (`#[non_exhaustive]`,
-  default `Sigmoid`), the crate-private `fn(f64) -> f64` behind each (the public way
-  is `ActivationFunction::apply`), the frozen file codes, and the public `softmax`
-  and `argmax` helpers. Softmax is deliberately not a variant: it needs the whole
-  layer, and the file format stores one per-neuron function code per layer.
-  `add_bias_and_activate` is the forward passes' hot loop. It takes an iterator of
-  columns (one for `forward_into`, one per sample for `forward_batch_into`) and
-  matches the variant once per call, so once per layer on both paths, with no
-  wildcard arm so a new variant does not compile until it is handled; each arm runs
-  a loop monomorphized for that function over every column. Adding the bias in the
-  same loop is deliberate: a separate bias pass followed by the (two-lane vectorized)
-  sigmoid loop made the 4-6-2 benchmark 31% slower, most likely through failed
-  store-to-load forwarding on layers narrower than 8 neurons.
-- `src/init.rs`: `Init` (`#[non_exhaustive]`), the weight ranges behind
-  `NeuralNetwork::new_with_init`. `Layer::random` draws from them; `Init::default()`
-  is the `[-1, 1)` that `new` and `new_with_rng` have always used, and their output
-  for a given seed must never change.
-- `src/perceptron.rs`: a separate, compile-time-sized path, `Perceptron<N>` over
-  `[f64; N]`, with its own serde plain form (`PerceptronData`). It converts into a
-  `NeuralNetwork<N, 1>` with no hidden layers, which is how it is saved.
-- `src/bvector.rs`: `BVector`, deprecated since 0.5.0 and kept only so old code
-  compiles. Nothing else in the crate uses it.
+- `src/neural_network.rs`: `NeuralNetwork<IN, OUT>`, a `Vec<Layer>`, and `Trace`.
+  Public layer `n` is `self.layers[n - 1]`. Setter panic messages are asserted on by
+  unit tests.
+- `src/layer.rs`: `Layer`, a nalgebra weight matrix plus a bias vector, and the
+  forward-pass hot paths. **Weights are stored transposed** (`inputs × neurons`, one
+  column per neuron), so nalgebra's column-major memory *is* the flat row-per-neuron
+  order and the flat view, in-place mutation and the file writer all work on one
+  contiguous slice. Index it as `weights[(input, neuron)]`; `Layer`'s own methods
+  still speak in rows per neuron.
+- `src/activation_functions.rs`: `ActivationFunction` (`#[non_exhaustive]`, default
+  `Sigmoid`), its frozen file codes, `derivative`, and the `softmax` / `argmax`
+  helpers. Softmax is deliberately not a variant, since it needs the whole layer.
+  `add_bias_and_activate` matches the variant once per layer with no wildcard arm, so
+  a new variant does not compile until it is handled there.
+- `NetworkData` / `LayerData` are **the single validation funnel**: the serde plain
+  form (`{"layers": [{"activation", "weights", "biases"}]}`) that `NeuralNetwork`
+  serializes through, and what both file readers produce before the same `TryFrom`
+  checks layers against each other and against `IN` / `OUT`. Any new way of building
+  a network from untrusted data goes through it.
+- `src/io.rs`: the file format, `ModelError` (`thiserror`, `#[non_exhaustive]`), and
+  a bounded `Decoder` so a corrupted length cannot exhaust memory. `load_model`
+  requires the file to end where the model ends; `read_model` leaves trailing data so
+  several models can share a stream.
+- `src/init.rs`: `Init` (`Xavier`, `He`, `Uniform`), the per-layer weight ranges
+  behind `new_with_init`.
+- `src/perceptron.rs`: `Perceptron<N>`, a separate compile-time-sized single neuron
+  with its own serde form. It converts into a `NeuralNetwork<N, 1>` with no hidden
+  layers, which is how it is saved.
+- `src/bvector.rs`: deprecated since 0.5.0, kept only so old code compiles.
 
-Errors: IO and deserialization return `ModelError`; in-memory misuse (bad layer
-index, wrong shape) panics, matching the "direct access" design.
+The hot paths in `src/layer.rs` and `add_bias_and_activate` were tuned against the
+benchmarks in `benches/network.rs`, and the comments there record why (stack scratch
+buffers, which nalgebra product to use, adding the bias inside the activation loop).
+Read them before restructuring, and benchmark any change to them.
+
+## Commands
+
+```sh
+cargo test --all-targets                        # unit + integration tests, builds examples and benches
+cargo test --doc                                # doctests, including README.md
+cargo test --test model_io                      # one integration test file
+cargo test --test model_io a_legacy_file_loads  # one integration test
+cargo test feed_forward                         # unit tests matching a name
+cargo clippy --all-targets -- -D warnings
+cargo fmt --check                               # also: cargo fmt --check --manifest-path fuzz/Cargo.toml
+RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
+cargo bench                                     # criterion; `cargo bench -- feed_forward` for one group
+cargo run --example xor_evolution               # end-to-end check of the flat view, run in CI
+cargo run --example iris_backprop               # end-to-end check of the layer view and trace, run in CI
+cargo +1.88 test --all-targets                  # the MSRV
+cargo +nightly fuzz run read_model              # needs cargo-fuzz; also `mutated_model`
+```
+
+CI (`.github/workflows/ci.yml`) runs all of these except the benchmarks, plus
+`cargo publish --dry-run` and `cargo semver-checks` against the latest crates.io
+release. Run the test, clippy, fmt and doc commands before considering a change done.
+
+## Things that are easy to break
+
+- **README.md is compiled as doctests** (`src/lib.rs` includes it under
+  `cfg(doctest)`). A fenced block without a language tag is Rust and must compile, so
+  tag non-Rust blocks (` ```sh `, ` ```text `). Dev-dependencies like `serde_json`
+  are available there.
+- **Published files are an allowlist.** `Cargo.toml` `include` ships only `src`,
+  `Cargo.toml`, `README.md`, `CHANGELOG.md` and `LICENSE`, so README links to
+  examples, tests or `fuzz/` must be absolute GitHub URLs.
+- **`fuzz/` is a separate cargo-fuzz package**, not a workspace member, with its own
+  lockfile. A crash it finds is a reader bug: fix it and add the input as a
+  regression test in `tests/model_io.rs`.
+- **`#![warn(missing_docs)]`** plus clippy's `-D warnings` means every public item
+  needs rustdoc.
+- **MSRV is 1.88, edition 2024.** Raising it is a changelog entry and must also
+  change the MSRV job in CI.
+- **Semver is enforced.** A breaking public API change needs a minor (0.x) version
+  bump, or the semver job fails.
+- **Hand-aligned weight matrices** (one row per line) in code are marked
+  `#[rustfmt::skip]`.
 
 ## Conventions
 
@@ -168,7 +153,7 @@ index, wrong shape) panics, matching the "direct access" design.
   with `Added` / `Changed` / `Fixed` / `Removed` sections and a **Breaking:** prefix
   on breaking entries. Releases are commits titled `release: X.Y.Z`.
 - Public items carry rustdoc with `# Panics`, `# Errors` and `# Example` sections
-  where applicable. Doc examples are tests.
+  where they apply. Doc examples are tests.
 - Tests are named as sentences describing the behaviour
   (`a_truncated_model_is_reported_as_malformed`). Unit tests live in `#[cfg(test)]`
   modules; public-API and format-compatibility tests live in `tests/model_io.rs`.
