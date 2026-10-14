@@ -107,7 +107,10 @@ jobs:
             exec cargo semver-checks
           fi
           status=0
-          cargo semver-checks 2>&1 | tee "$RUNNER_TEMP/semver.log" || status=$?
+          # No pipe into tee: a run step's default shell has no pipefail, so the
+          # pipeline would report tee's status instead.
+          cargo semver-checks > "$RUNNER_TEMP/semver.log" 2>&1 || status=$?
+          cat "$RUNNER_TEMP/semver.log"
           if [ "$status" -ne 0 ]; then
             if grep -q 'semver requires new major version' "$RUNNER_TEMP/semver.log"; then
               echo "::warning title=semver-checks::Breaking changes against 0.4.0, expected until the version is bumped to 0.5.0"
