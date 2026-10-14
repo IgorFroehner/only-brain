@@ -100,7 +100,7 @@ helper in `activation_functions.rs` must be added to its `pub use` in `src/lib.r
 - `src/bvector.rs`: deprecated since 0.5.0, kept only so old code compiles.
 
 The hot paths in `src/layer.rs` and `add_bias_and_activate` were tuned against the
-benchmarks in `benches/network.rs`, and the comments there record why (stack scratch
+benchmarks in `benches/`, and the comments there record why (stack scratch
 buffers, which nalgebra product to use, adding the bias inside the activation loop).
 Read them before restructuring, and benchmark any change to them.
 
@@ -115,7 +115,9 @@ cargo test feed_forward                         # unit tests matching a name
 cargo clippy --all-targets -- -D warnings
 cargo fmt --check                               # also: cargo fmt --check --manifest-path fuzz/Cargo.toml
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
-cargo bench                                     # criterion; `cargo bench -- feed_forward` for one group
+cargo bench                                     # criterion, every target; compares with the previous run
+cargo bench --bench inference -- '^feed_forward' # one target, ids matching a regex
+scripts/bench-compare.sh                        # main, then the working tree, and what changed
 cargo run --example xor_evolution               # end-to-end check of the flat view, run in CI
 cargo run --example iris_backprop               # end-to-end check of the layer view and trace, run in CI
 cargo +1.88 test --all-targets                  # the MSRV
@@ -125,6 +127,28 @@ cargo +nightly fuzz run read_model              # needs cargo-fuzz; also `mutate
 CI (`.github/workflows/ci.yml`) runs all of these except the benchmarks, plus
 `cargo publish --dry-run` and `cargo semver-checks` against the latest crates.io
 release. Run the test, clippy, fmt and doc commands before considering a change done.
+
+## Benchmarks
+
+Four Criterion targets in `benches/`, sharing `benches/common/mod.rs`:
+
+- `inference`: `feed_forward` across shapes, per activation, batched and traced;
+  `apply` and `derivative`; `softmax`, `argmax`; `Perceptron`.
+- `parameters`: the flat view, construction and cloning, and the layer view.
+- `model_io`: the binary format and serde.
+- `workloads`: a genetic algorithm generation and a backpropagation epoch, end to end.
+
+Benchmark ids (`group/function/shape`) are what baselines are matched on, so do not
+rename existing ones; add new ones instead. To measure a change, either save the
+unchanged code with `cargo bench -- --save-baseline before` and compare with
+`cargo bench -- --baseline-lenient before` (as often as needed; it does not
+overwrite `before`), or run
+`scripts/bench-compare.sh [ref] [cargo options] [-- criterion options]`, which
+benchmarks `ref` (default `main`) in a temporary worktree, then the working tree,
+and lists what regressed, improved, and could not be compared. Changes of a few
+percent on one run are often noise on a laptop; re-run against the same baseline
+before concluding. `.claude/skills/benchmarks/SKILL.md` has
+the details: what each benchmark measures, reading the output, adding one.
 
 ## Things that are easy to break
 

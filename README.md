@@ -340,7 +340,8 @@ cargo test --doc                              # doctests, including every snippe
 cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
-cargo bench                                   # feed_forward, batches, flat parameters, model IO
+cargo bench                                   # forward passes, parameters, model IO, training loops
+scripts/bench-compare.sh                      # benchmarks main, then the working tree, and compares
 ```
 
 CI runs the same checks on every push and pull request, plus the tests on Rust 1.88,

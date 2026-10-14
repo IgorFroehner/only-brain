@@ -19,8 +19,25 @@ nalgebra = "0.34"
 serde = { version = "1.0.219", features = ["derive"] }
 thiserror = "2.0.19"
 
+# Criterion takes the command-line options the libtest harness rejects
+# (`--save-baseline`, `--baseline`), so only the Criterion targets are benchmarked.
+[lib]
+bench = false
+
 [[bench]]
-name = "network"
+name = "inference"
+harness = false
+
+[[bench]]
+name = "parameters"
+harness = false
+
+[[bench]]
+name = "model_io"
+harness = false
+
+[[bench]]
+name = "workloads"
 harness = false
 
 [dev-dependencies]
