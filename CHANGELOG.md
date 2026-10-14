@@ -2,12 +2,13 @@
 
 ## 0.5.0
 
-Plain arrays at the whole boundary and a `Perceptron` on par with `NeuralNetwork`;
-what backpropagation needs (a traced forward pass and activation derivatives); four
-new activation functions and a `softmax` helper; scaled initialisation and tidier
-names; in-place parameter mutation, and weights stored in the flat parameter order.
-The minimum supported Rust version, 1.88, is now declared, and the crate moves to
-the 2024 edition.
+What backpropagation needs: a traced forward pass and activation derivatives, with
+a worked Iris example. Four new activation functions, a `softmax` helper, and scaled
+initialisation. Plain arrays at the whole boundary, a `Perceptron` on par with
+`NeuralNetwork`, and tidier names. In-place parameter mutation, with the weights
+stored in the flat parameter order, which makes `feed_forward` and the parameter
+and model-file paths faster. The minimum supported Rust version, 1.88, is now
+declared, and the crate moves to the 2024 edition.
 
 ### Added
 
