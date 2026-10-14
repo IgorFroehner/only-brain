@@ -42,6 +42,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.88
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --all-targets
+      - run: cargo test --doc
 
   clippy:
     name: Clippy and rustfmt
@@ -94,16 +95,23 @@ jobs:
       #
       # 0.5.0 breaks 0.4.0's API on purpose (see CHANGELOG.md), but Cargo.toml says
       # 0.4.0 until the `release: 0.5.0` commit, so those breaks are reported as if
-      # for a patch release. While the version is 0.4.0 they are only a warning; once
-      # it is bumped, every reported break fails the job. Drop the `if` after 0.5.0
-      # is released.
+      # for a patch release. While the version is 0.4.0, reported breaks are only a
+      # warning; the tool failing for any other reason (network, build) still fails
+      # the job. Once the version is bumped, every reported break fails it too. Drop
+      # the 0.4.0 branch after 0.5.0 is released.
       - name: cargo semver-checks
         run: |
-          if grep -qx 'version = "0.4.0"' Cargo.toml; then
-            cargo semver-checks ||
+          if ! cargo pkgid | grep -q '@0\.4\.0$'; then
+            exec cargo semver-checks
+          fi
+          status=0
+          cargo semver-checks 2>&1 | tee "$RUNNER_TEMP/semver.log" || status=$?
+          if [ "$status" -ne 0 ]; then
+            if grep -q 'semver requires new major version' "$RUNNER_TEMP/semver.log"; then
               echo "::warning title=semver-checks::Breaking changes against 0.4.0, expected until the version is bumped to 0.5.0"
-          else
-            cargo semver-checks
+            else
+              exit "$status"
+            fi
           fi
 
   fuzz:

@@ -1,8 +1,14 @@
 //! Feeds arbitrary bytes to `read_model`, which must return an error rather than
-//! panic, hang or exhaust memory, whatever the data.
+//! panic, hang or exhaust memory, whatever the data. Whatever it does load must
+//! round-trip: save, load back, and save to the same bytes again.
 //!
-//! Seed it with the format fixtures so it starts from real files of both formats:
-//! `cargo +nightly fuzz run read_model fuzz/corpus/read_model tests/fixtures`.
+//! Run it with `cargo +nightly fuzz run read_model`. To start from the format fixtures,
+//! real files of both formats, as CI does:
+//!
+//! ```sh
+//! mkdir -p fuzz/corpus/read_model
+//! cargo +nightly fuzz run read_model fuzz/corpus/read_model tests/fixtures
+//! ```
 
 #![no_main]
 

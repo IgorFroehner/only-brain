@@ -26,7 +26,7 @@ cargo bench                                     # criterion; `cargo bench -- fee
 cargo run --example xor_evolution               # end-to-end check of the flat parameter view, run in CI
 cargo run --example iris_backprop               # end-to-end check of backprop through the public API, run in CI
 cargo publish --dry-run                         # CI packages the crate on every push
-cargo +1.88 test --all-targets                  # the MSRV, run in CI
+cargo +1.88 test --all-targets                  # the MSRV; CI also runs `cargo +1.88 test --doc`
 cargo +nightly fuzz run read_model              # needs cargo-fuzz; CI runs each fuzz target for 60 s
 ```
 
@@ -36,10 +36,10 @@ before considering a change done.
 
 The crate is edition 2024 with `rust-version = "1.88"` (the first release with
 `slice::as_chunks` and let chains). Raising it is a changelog entry, and the MSRV job
-in CI pins the same version, so change both. The semver job only warns while
-`Cargo.toml` says 0.4.0, because 0.5.0's breaks are deliberate; from the 0.5.0
-version bump on, a reported break fails it, so a breaking change needs a minor (0.x)
-version bump.
+in CI pins the same version, so change both. The semver job only warns about reported
+breaks while `Cargo.toml` says 0.4.0, because 0.5.0's breaks are deliberate (a tool
+failure still fails it); from the 0.5.0 version bump on, a reported break fails it,
+so a breaking change needs a minor (0.x) version bump.
 
 ## Things that are easy to break
 

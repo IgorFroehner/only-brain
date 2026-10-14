@@ -18,9 +18,7 @@
 //!
 //! # Example
 //!
-//! The input and output widths are part of the network's type, so a wrongly sized
-//! input is a compile error. Hidden layers are given at construction time, and weights
-//! and biases are plain arrays, slices or `Vec`s.
+//! Building a small network by hand and running it:
 //!
 //! ```
 //! use only_brain::NeuralNetwork;
