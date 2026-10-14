@@ -33,16 +33,30 @@ jobs:
       # the trace and the activation derivatives. It asserts a test accuracy.
       - run: cargo run --example iris_backprop
 
+  msrv:
+    name: MSRV
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Keep in sync with `rust-version` in Cargo.toml.
+      - uses: dtolnay/rust-toolchain@1.88
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --all-targets
+      - run: cargo test --doc
+
   clippy:
-    name: Clippy
+    name: Clippy and rustfmt
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy
+          components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo fmt --check
+      # The fuzz crate is a separate package, which the line above does not cover.
+      - run: cargo fmt --check --manifest-path fuzz/Cargo.toml
 
   docs:
     name: Docs
@@ -64,3 +78,70 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       # Builds the crate exactly as it would be published.
       - run: cargo publish --dry-run
+
+  semver:
+    name: Semver
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-semver-checks
+      # Compares the public API against the latest release on crates.io, judging the
+      # changes by the version in Cargo.toml: on 0.x, a minor bump may break, a patch
+      # bump may not.
+      #
+      # 0.5.0 breaks 0.4.0's API on purpose (see CHANGELOG.md), but Cargo.toml says
+      # 0.4.0 until the `release: 0.5.0` commit, so those breaks are reported as if
+      # for a patch release. While the version is 0.4.0, reported breaks are only a
+      # warning; the tool failing for any other reason (network, build) still fails
+      # the job. Once the version is bumped, every reported break fails it too. Drop
+      # the 0.4.0 branch after 0.5.0 is released.
+      - name: cargo semver-checks
+        run: |
+          # The package id ends in `#0.4.0`, or `#only-brain@0.4.0` when the checkout
+          # directory is not named after the package.
+          if [[ "$(cargo pkgid)" != *[#@]0.4.0 ]]; then
+            exec cargo semver-checks
+          fi
+          status=0
+          # No pipe into tee: a run step's default shell has no pipefail, so the
+          # pipeline would report tee's status instead.
+          cargo semver-checks > "$RUNNER_TEMP/semver.log" 2>&1 || status=$?
+          cat "$RUNNER_TEMP/semver.log"
+          if [ "$status" -ne 0 ]; then
+            if grep -q 'semver requires new major version' "$RUNNER_TEMP/semver.log"; then
+              echo "::warning title=semver-checks::Breaking changes against 0.4.0, expected until the version is bumped to 0.5.0"
+            else
+              exit "$status"
+            fi
+          fi
+
+  fuzz:
+    name: Fuzz (smoke)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz -> target
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
+      # A minute per target: read_model must return an error, never panic, on any
+      # bytes. It starts from the format fixtures, real files of both formats.
+      # The prebuilt cargo-fuzz is a musl binary and would default to building for
+      # musl, where the address sanitizer is unavailable, so the target is explicit.
+      - run: mkdir -p fuzz/corpus/read_model
+      - run: cargo fuzz run --target x86_64-unknown-linux-gnu read_model fuzz/corpus/read_model tests/fixtures -- -max_total_time=60
+      - run: cargo fuzz run --target x86_64-unknown-linux-gnu mutated_model -- -max_total_time=60
+      # The input that crashed, to reproduce locally with `cargo +nightly fuzz run
+      # <target> <file>`.
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts
+          path: fuzz/artifacts

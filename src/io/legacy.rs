@@ -23,7 +23,10 @@ use crate::{ActivationFunction, ModelError};
 
 /// Reads the rest of a legacy model whose first eight bytes, the layer count, have
 /// already been read.
-pub(super) fn read<R: Read>(layer_count: u64, decoder: &mut Decoder<R>) -> Result<NetworkData, ModelError> {
+pub(super) fn read<R: Read>(
+    layer_count: u64,
+    decoder: &mut Decoder<R>,
+) -> Result<NetworkData, ModelError> {
     read_network(layer_count, decoder).map_err(|error| match error {
         // Without a magic to go by, data that does not parse is most likely not a model.
         ModelError::Malformed { .. } => ModelError::UnrecognizedFormat,
@@ -31,7 +34,10 @@ pub(super) fn read<R: Read>(layer_count: u64, decoder: &mut Decoder<R>) -> Resul
     })
 }
 
-fn read_network<R: Read>(layer_count: u64, decoder: &mut Decoder<R>) -> Result<NetworkData, ModelError> {
+fn read_network<R: Read>(
+    layer_count: u64,
+    decoder: &mut Decoder<R>,
+) -> Result<NetworkData, ModelError> {
     let mut layers = Vec::new();
     for index in 0..layer_count {
         layers.push(read_layer(decoder, index as usize + 1)?);
@@ -82,7 +88,11 @@ fn read_layer<R: Read>(decoder: &mut Decoder<R>, layer: usize) -> Result<LayerDa
     // Both counts are bounded by the values actually read, so these fit in memory.
     let (rows, columns) = (rows as usize, columns as usize);
     let weights = (0..rows)
-        .map(|row| (0..columns).map(|column| columns_first[column * rows + row]).collect())
+        .map(|row| {
+            (0..columns)
+                .map(|column| columns_first[column * rows + row])
+                .collect()
+        })
         .collect();
 
     Ok(LayerData {

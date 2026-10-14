@@ -48,7 +48,10 @@ impl Default for Init {
     /// `Uniform { low: -1.0, high: 1.0 }`, the initialisation of
     /// [`NeuralNetwork::new`](crate::NeuralNetwork::new).
     fn default() -> Self {
-        Init::Uniform { low: -1.0, high: 1.0 }
+        Init::Uniform {
+            low: -1.0,
+            high: 1.0,
+        }
     }
 }
 
@@ -84,7 +87,13 @@ mod tests {
 
     #[test]
     fn the_default_is_the_range_new_has_always_used() {
-        assert_eq!(Init::default(), Init::Uniform { low: -1.0, high: 1.0 });
+        assert_eq!(
+            Init::default(),
+            Init::Uniform {
+                low: -1.0,
+                high: 1.0
+            }
+        );
         assert_eq!(Init::default().bounds(8, 3), (-1.0, 1.0));
     }
 
@@ -103,19 +112,31 @@ mod tests {
     #[test]
     #[should_panic(expected = "low < high")]
     fn an_empty_uniform_range_is_rejected() {
-        Init::Uniform { low: 1.0, high: 1.0 }.bounds(1, 1);
+        Init::Uniform {
+            low: 1.0,
+            high: 1.0,
+        }
+        .bounds(1, 1);
     }
 
     #[test]
     #[should_panic(expected = "finite bounds")]
     fn an_infinite_uniform_range_is_rejected() {
-        Init::Uniform { low: f64::NEG_INFINITY, high: 1.0 }.bounds(1, 1);
+        Init::Uniform {
+            low: f64::NEG_INFINITY,
+            high: 1.0,
+        }
+        .bounds(1, 1);
     }
 
     /// Both bounds are finite, but `high - low` overflows, which `Uniform::new` rejects.
     #[test]
     #[should_panic(expected = "finite width")]
     fn a_uniform_range_whose_width_overflows_is_rejected() {
-        Init::Uniform { low: -f64::MAX, high: f64::MAX }.bounds(1, 1);
+        Init::Uniform {
+            low: -f64::MAX,
+            high: f64::MAX,
+        }
+        .bounds(1, 1);
     }
 }

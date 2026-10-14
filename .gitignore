@@ -1,3 +1,7 @@
 /target
 rustc-*
 /model.bin
+/fuzz/target
+/fuzz/artifacts
+/fuzz/corpus
+/fuzz/coverage

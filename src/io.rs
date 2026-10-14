@@ -197,7 +197,8 @@ pub fn write_model<const IN: usize, const OUT: usize>(
     mut writer: impl Write,
 ) -> Result<(), ModelError> {
     let layers = model.layers();
-    let mut bytes = Vec::with_capacity(MAGIC.len() + 10 + 8 * model.parameter_count() + 5 * layers.len());
+    let mut bytes =
+        Vec::with_capacity(MAGIC.len() + 10 + 8 * model.parameter_count() + 5 * layers.len());
 
     bytes.extend_from_slice(&MAGIC);
     bytes.extend_from_slice(&MODEL_FORMAT_VERSION.to_le_bytes());
@@ -236,7 +237,9 @@ pub fn read_model<const IN: usize, const OUT: usize>(
 ) -> Result<NeuralNetwork<IN, OUT>, ModelError> {
     let mut decoder = Decoder::new(reader);
 
-    let start: [u8; 8] = decoder.bytes().map_err(|_| ModelError::UnrecognizedFormat)?;
+    let start: [u8; 8] = decoder
+        .bytes()
+        .map_err(|_| ModelError::UnrecognizedFormat)?;
     let data = if start == MAGIC {
         match decoder.u16()? {
             1 => read_v1(&mut decoder)?,
@@ -244,7 +247,7 @@ pub fn read_model<const IN: usize, const OUT: usize>(
                 return Err(ModelError::UnsupportedVersion {
                     found,
                     newest: MODEL_FORMAT_VERSION,
-                })
+                });
             }
         }
     } else {
@@ -269,9 +272,10 @@ fn read_v1<R: Read>(decoder: &mut Decoder<R>) -> Result<NetworkData, ModelError>
                 reason: "a layer has no neurons",
             });
         }
-        let activation = ActivationFunction::from_code(decoder.u8()?).ok_or(ModelError::Malformed {
-            reason: "unknown activation function code",
-        })?;
+        let activation =
+            ActivationFunction::from_code(decoder.u8()?).ok_or(ModelError::Malformed {
+                reason: "unknown activation function code",
+            })?;
 
         let mut weights = Vec::new();
         for _ in 0..neurons {
@@ -298,12 +302,14 @@ fn format_count(count: usize) -> u32 {
 /// Reads exactly enough bytes to fill `bytes`, reporting a short read as a malformed
 /// model.
 fn fill(reader: &mut impl Read, bytes: &mut [u8]) -> Result<(), ModelError> {
-    reader.read_exact(bytes).map_err(|error| match error.kind() {
-        std::io::ErrorKind::UnexpectedEof => ModelError::Malformed {
-            reason: "the data ends before the model does",
-        },
-        _ => ModelError::Io(error),
-    })
+    reader
+        .read_exact(bytes)
+        .map_err(|error| match error.kind() {
+            std::io::ErrorKind::UnexpectedEof => ModelError::Malformed {
+                reason: "the data ends before the model does",
+            },
+            _ => ModelError::Io(error),
+        })
 }
 
 /// How many floats [`Decoder::f64s`] reads per chunk.

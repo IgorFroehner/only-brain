@@ -20,15 +20,26 @@ cargo test --test model_io                      # one integration test file
 cargo test --test model_io a_legacy_file_loads  # one integration test
 cargo test feed_forward                         # unit tests matching a name
 cargo clippy --all-targets -- -D warnings       # CI fails on any warning
+cargo fmt --check                               # CI fails on unformatted code, here and in fuzz/
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps  # CI fails on broken intra-doc links
 cargo bench                                     # criterion; `cargo bench -- feed_forward` for one group
 cargo run --example xor_evolution               # end-to-end check of the flat parameter view, run in CI
 cargo run --example iris_backprop               # end-to-end check of backprop through the public API, run in CI
 cargo publish --dry-run                         # CI packages the crate on every push
+cargo +1.88 test --all-targets                  # the MSRV; CI also runs `cargo +1.88 test --doc`
+cargo +nightly fuzz run read_model              # needs cargo-fuzz; CI runs each fuzz target for 60 s
 ```
 
-CI (`.github/workflows/ci.yml`) runs exactly these. Run the test, clippy and doc
-commands before considering a change done.
+CI (`.github/workflows/ci.yml`) runs exactly these, plus `cargo semver-checks`
+against the latest crates.io release. Run the test, clippy, fmt and doc commands
+before considering a change done.
+
+The crate is edition 2024 with `rust-version = "1.88"` (the first release with
+`slice::as_chunks` and let chains). Raising it is a changelog entry, and the MSRV job
+in CI pins the same version, so change both. The semver job only warns about reported
+breaks while `Cargo.toml` says 0.4.0, because 0.5.0's breaks are deliberate (a tool
+failure still fails it); from the 0.5.0 version bump on, a reported break fails it,
+so a breaking change needs a minor (0.x) version bump.
 
 ## Things that are easy to break
 
@@ -51,9 +62,20 @@ commands before considering a change done.
   nalgebra layout by hand (column-major weights, network-wide activation). The
   `bincode` dev-dependency exists only so tests can write such files.
 - **Published crate contents are an allowlist.** `Cargo.toml` `include` ships only
-  `src`, `Cargo.toml`, `README.md`, `CHANGELOG.md` and `LICENSE`. Examples, tests
-  and benches are not published, so README links to them must be absolute GitHub
-  URLs, not relative paths.
+  `src`, `Cargo.toml`, `README.md`, `CHANGELOG.md` and `LICENSE`. Examples, tests,
+  benches and `fuzz/` are not published, so README links to them must be absolute
+  GitHub URLs, not relative paths.
+- **The model readers must never panic.** `fuzz/` is a separate cargo-fuzz package
+  (its own `Cargo.toml` and lockfile, not a workspace member) with two targets:
+  `read_model` (arbitrary bytes, seeded from `tests/fixtures`, and whatever loads
+  must round-trip) and `mutated_model` (a valid model with corrupted or truncated
+  bytes). A crash it finds is a reader bug: fix it and add the input as a regression
+  test in `tests/model_io.rs`.
+- **`#![warn(missing_docs)]` is on**, and clippy's `-D warnings` makes it an error,
+  so every public item needs rustdoc.
+- **Hand-aligned weight matrices** (one row per line) in code are marked
+  `#[rustfmt::skip]` on the statement or function; rustfmt leaves doc comments
+  alone, so doc examples need nothing.
 
 ## Architecture
 

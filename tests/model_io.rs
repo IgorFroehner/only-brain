@@ -6,8 +6,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use nalgebra::{DMatrix, DVector};
 use only_brain::{
-    dump_model, load_model, read_model, write_model, ActivationFunction, ModelError,
-    NeuralNetwork, MODEL_FORMAT_VERSION,
+    ActivationFunction, MODEL_FORMAT_VERSION, ModelError, NeuralNetwork, dump_model, load_model,
+    read_model, write_model,
 };
 
 const EPSILON: f64 = 1e-12;
@@ -56,7 +56,10 @@ fn sample_network() -> NeuralNetwork<2, 2> {
 fn assert_all_close(actual: &[f64], expected: &[f64]) {
     assert_eq!(actual.len(), expected.len(), "length mismatch");
     for (i, (a, e)) in actual.iter().zip(expected).enumerate() {
-        assert!((a - e).abs() < EPSILON, "at index {i}: expected {e}, got {a}");
+        assert!(
+            (a - e).abs() < EPSILON,
+            "at index {i}: expected {e}, got {a}"
+        );
     }
 }
 
@@ -66,8 +69,7 @@ fn a_dumped_model_loads_back_with_identical_structure_and_weights() {
     let original = sample_network();
 
     dump_model(&original, temp.path()).expect("dump should succeed");
-    let loaded: NeuralNetwork<2, 2> =
-        load_model(temp.path()).expect("load should succeed");
+    let loaded: NeuralNetwork<2, 2> = load_model(temp.path()).expect("load should succeed");
 
     assert_eq!(loaded.num_layers(), original.num_layers());
     for layer in 0..original.num_layers() {
@@ -95,8 +97,7 @@ fn a_loaded_model_produces_the_same_output_as_the_original() {
     let expected = original.feed_forward(&input);
 
     dump_model(&original, temp.path()).expect("dump should succeed");
-    let loaded: NeuralNetwork<2, 2> =
-        load_model(temp.path()).expect("load should succeed");
+    let loaded: NeuralNetwork<2, 2> = load_model(temp.path()).expect("load should succeed");
 
     assert_all_close(&loaded.feed_forward(&input), &expected);
 }
@@ -109,8 +110,7 @@ fn per_layer_activation_functions_survive_a_round_trip() {
     original.set_output_activation(ActivationFunction::Tanh);
 
     dump_model(&original, temp.path()).expect("dump should succeed");
-    let loaded: NeuralNetwork<2, 2> =
-        load_model(temp.path()).expect("load should succeed");
+    let loaded: NeuralNetwork<2, 2> = load_model(temp.path()).expect("load should succeed");
 
     assert_eq!(loaded.layer_activation(1), ActivationFunction::ReLU);
     assert_eq!(loaded.layer_activation(2), ActivationFunction::Tanh);
@@ -142,13 +142,17 @@ fn every_activation_function_survives_a_round_trip() {
         // magic (8) + version (2) + inputs (4) + layers (4) + first layer's neurons (4)
         assert_eq!(bytes[22], code, "{activation:?}");
 
-        let loaded: NeuralNetwork<2, 2> = read_model(bytes.as_slice()).expect("read should succeed");
+        let loaded: NeuralNetwork<2, 2> =
+            read_model(bytes.as_slice()).expect("read should succeed");
         assert_eq!(loaded.layer_activation(1), activation);
         assert_eq!(loaded.output_activation(), activation);
         assert_eq!(loaded, original);
 
         let json = serde_json::to_string(&original).unwrap();
-        assert!(json.contains(&format!(r#""activation":"{name}""#)), "{json}");
+        assert!(
+            json.contains(&format!(r#""activation":"{name}""#)),
+            "{json}"
+        );
         let from_json: NeuralNetwork<2, 2> = serde_json::from_str(&json).unwrap();
         assert_eq!(from_json, original);
     }
@@ -237,7 +241,10 @@ fn write_raw_with_activation(
     fs::write(temp.path(), bincode::serialize(&raw).unwrap()).unwrap();
 }
 
-fn assert_inconsistent_layer(result: Result<NeuralNetwork<2, 2>, ModelError>, expected_layer: usize) {
+fn assert_inconsistent_layer(
+    result: Result<NeuralNetwork<2, 2>, ModelError>,
+    expected_layer: usize,
+) {
     match result {
         Err(ModelError::InconsistentLayer { layer, .. }) => assert_eq!(layer, expected_layer),
         other => panic!("expected an inconsistent layer error, got {other:?}"),
@@ -300,7 +307,11 @@ fn every_pre_0_3_activation_loads_from_a_legacy_file() {
         ActivationFunction::BinaryStep,
     ] {
         let temp = TempModelPath::new("raw-old-activation");
-        write_raw_with_activation(&temp, vec![raw_layer(3, 2), raw_layer(2, 3)], Some(activation));
+        write_raw_with_activation(
+            &temp,
+            vec![raw_layer(3, 2), raw_layer(2, 3)],
+            Some(activation),
+        );
 
         let loaded = load_model::<2, 2>(temp.path()).expect("legacy file should load");
 
@@ -319,10 +330,17 @@ fn a_legacy_file_with_a_function_added_after_0_3_is_unrecognized() {
         ActivationFunction::SiLU,
     ] {
         let temp = TempModelPath::new("raw-new-activation");
-        write_raw_with_activation(&temp, vec![raw_layer(3, 2), raw_layer(2, 3)], Some(activation));
+        write_raw_with_activation(
+            &temp,
+            vec![raw_layer(3, 2), raw_layer(2, 3)],
+            Some(activation),
+        );
 
         assert!(
-            matches!(load_model::<2, 2>(temp.path()), Err(ModelError::UnrecognizedFormat)),
+            matches!(
+                load_model::<2, 2>(temp.path()),
+                Err(ModelError::UnrecognizedFormat)
+            ),
             "{activation:?}"
         );
     }
@@ -333,7 +351,10 @@ fn a_legacy_file_with_no_layers_reports_an_empty_network() {
     let temp = TempModelPath::new("raw-empty");
     write_raw(&temp, vec![]);
 
-    assert!(matches!(load_model::<2, 2>(temp.path()), Err(ModelError::EmptyNetwork)));
+    assert!(matches!(
+        load_model::<2, 2>(temp.path()),
+        Err(ModelError::EmptyNetwork)
+    ));
 }
 
 #[test]
@@ -380,7 +401,11 @@ fn raw_bytes(layers: Vec<RawLayer>) -> Vec<u8> {
 /// offset fails here rather than corrupting some other field.
 fn replace_u64(bytes: &mut [u8], offset: usize, old: u64, new: u64) {
     let field = &mut bytes[offset..offset + 8];
-    assert_eq!(u64::from_le_bytes(field.try_into().unwrap()), old, "unexpected value at {offset}");
+    assert_eq!(
+        u64::from_le_bytes(field.try_into().unwrap()),
+        old,
+        "unexpected value at {offset}"
+    );
     field.copy_from_slice(&new.to_le_bytes());
 }
 
@@ -454,7 +479,10 @@ fn deserializing_directly_also_validates() {
     ]}"#;
 
     let error = serde_json::from_str::<NeuralNetwork<2, 2>>(broken_chain).unwrap_err();
-    assert!(error.to_string().contains("layer 2"), "unexpected error: {error}");
+    assert!(
+        error.to_string().contains("layer 2"),
+        "unexpected error: {error}"
+    );
     assert!(serde_json::from_str::<NeuralNetwork<2, 2>>(wrong_output).is_err());
 }
 
@@ -472,7 +500,9 @@ fn deserializing_rejects_a_layer_without_neurons() {
     for (json, layer) in [(empty_first, 1), (empty_hidden, 2)] {
         let error = serde_json::from_str::<NeuralNetwork<2, 2>>(json).unwrap_err();
         assert!(
-            error.to_string().contains(&format!("layer {layer} of the model is inconsistent: it has no neurons")),
+            error.to_string().contains(&format!(
+                "layer {layer} of the model is inconsistent: it has no neurons"
+            )),
             "unexpected error: {error}"
         );
     }
@@ -519,7 +549,10 @@ fn a_saved_model_starts_with_the_magic_and_the_format_version() {
     let bytes = to_bytes(&sample_network());
 
     assert_eq!(&bytes[..8], b"ONLYBRN\0");
-    assert_eq!(u16::from_le_bytes([bytes[8], bytes[9]]), MODEL_FORMAT_VERSION);
+    assert_eq!(
+        u16::from_le_bytes([bytes[8], bytes[9]]),
+        MODEL_FORMAT_VERSION
+    );
 }
 
 #[test]

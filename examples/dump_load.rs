@@ -1,8 +1,9 @@
-use only_brain::{dump_model, load_model, NeuralNetwork};
+use only_brain::{NeuralNetwork, dump_model, load_model};
 
 fn main() {
     let mut nn = NeuralNetwork::<2, 2>::new(&[3]);
 
+    #[rustfmt::skip]
     let first_layer_weights = [[0.1, 0.2],
                                [0.3, 0.4],
                                [0.5, 0.6]];
@@ -10,6 +11,7 @@ fn main() {
     nn.set_layer_weights(1, &first_layer_weights);
     nn.set_layer_biases(1, &[0.1, 0.2, 0.3]);
 
+    #[rustfmt::skip]
     let second_layer_weights = [[0.9, 0.8, 0.7],
                                 [0.6, 0.5, 0.4]];
     nn.set_layer_weights(2, &second_layer_weights);

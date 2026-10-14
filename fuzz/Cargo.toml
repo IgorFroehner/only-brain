@@ -1,0 +1,28 @@
+[package]
+name = "only-brain-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.only-brain]
+path = ".."
+
+[[bin]]
+name = "read_model"
+path = "fuzz_targets/read_model.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mutated_model"
+path = "fuzz_targets/mutated_model.rs"
+test = false
+doc = false
+bench = false

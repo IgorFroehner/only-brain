@@ -3,13 +3,16 @@
 
 use std::ops;
 
-use nalgebra::{SimdRealField, SVector};
+use nalgebra::{SVector, SimdRealField};
 
 /// A vector with a compile-time dimension, once the input type of [`crate::Perceptron`].
 ///
 /// Deprecated: [`crate::Perceptron`] now takes plain arrays, so `bvector![a, b]` becomes
 /// `[a, b]`. An existing `BVector` converts with `.into()`.
-#[deprecated(since = "0.5.0", note = "use a plain array `[T; N]`, which `Perceptron` now takes; convert an existing `BVector` with `.into()`")]
+#[deprecated(
+    since = "0.5.0",
+    note = "use a plain array `[T; N]`, which `Perceptron` now takes; convert an existing `BVector` with `.into()`"
+)]
 #[derive(Debug, Clone, PartialEq)]
 pub struct BVector<T: SimdRealField + Copy, const N: usize> {
     data_vector: SVector<T, N>,
@@ -33,10 +36,12 @@ impl<T: SimdRealField + Copy, const N: usize> BVector<T, N> {
         }
     }
 
+    /// The dot product of the two vectors: the sum of their elementwise products.
     pub fn dot(&self, other: &Self) -> T {
         self.data_vector.dot(&other.data_vector)
     }
 
+    /// The number of elements, `N`.
     pub fn len(&self) -> usize {
         N
     }
@@ -46,6 +51,11 @@ impl<T: SimdRealField + Copy, const N: usize> BVector<T, N> {
         N == 0
     }
 
+    /// The element at `index`.
+    ///
+    /// # Panics
+    ///
+    /// Panics with "Index out of bounds" if `index` is `N` or more.
     pub fn get(&self, index: usize) -> T {
         assert!(index < N, "Index out of bounds");
         self.data_vector[index]
@@ -83,7 +93,6 @@ macro_rules! bvector {
         }
     };
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -123,7 +132,10 @@ mod tests {
 
     #[test]
     fn add_is_element_wise() {
-        assert_eq!(bvector![1.0, 2.0] + bvector![0.5, -3.0], bvector![1.5, -1.0]);
+        assert_eq!(
+            bvector![1.0, 2.0] + bvector![0.5, -3.0],
+            bvector![1.5, -1.0]
+        );
     }
 
     #[test]

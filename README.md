@@ -27,6 +27,8 @@ or a formula on a napkin all work, because the library never hides the numbers.
 cargo add only-brain
 ```
 
+Only Brain needs Rust 1.88 or newer.
+
 ## Quick start
 
 ```rust
@@ -336,11 +338,15 @@ Run one with `cargo run --example xor_evolution`.
 cargo test --all-targets                      # unit and integration tests, builds the examples
 cargo test --doc                              # doctests, including every snippet in this README
 cargo clippy --all-targets -- -D warnings
+cargo fmt --check
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
 cargo bench                                   # feed_forward, batches, flat parameters, model IO
 ```
 
-CI runs the same checks on every push and pull request. The README is compiled as
+CI runs the same checks on every push and pull request, plus the tests on Rust 1.88,
+`cargo-semver-checks` against the latest release, and a short fuzzing run of the
+model reader (`cargo +nightly fuzz run read_model`, with
+[cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz)). The README is compiled as
 doctests, so its examples cannot go stale.
 
 ## Changelog
